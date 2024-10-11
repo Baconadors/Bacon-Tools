@@ -1,6 +1,11 @@
-:: Revision 1.6 - 22 September, 2024
-
 @echo off
+:: Check if the script is running elevated
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo This script requires administrative privileges. Please run as administrator.
+    exit /b
+)
+
 :: End all Simba and RuneLite processes
 echo Ending all Simba, OSRS, JagexLauncher, and RuneLite processes...
 taskkill /f /im Simba32.exe >nul 2>&1
