@@ -1,7 +1,5 @@
-:: License: Creative Commons Attribution-NonCommercial-NoDerivatives (CC BY-NC-ND)
-
 @echo off
-:: Check if the script is running elevated
+:: Check if the script is running elevated (admin privileges)
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo This script requires administrative privileges. Please run as administrator.
@@ -16,9 +14,44 @@ taskkill /f /im Simba64.exe >nul 2>&1
 taskkill /f /im RuneLite.exe >nul 2>&1
 taskkill /f /im JagexLauncher.exe >nul 2>&1
 
+:: Add exclusion for the Simba and SimbaBackupTMP folders in Windows Defender if not already present
+:: Excluding SimbaBackupTMP as Simba64.exe backup will trigger defender.
+echo ====================================================
+echo       SIMBA FOLDER WINDOWS DEFENDER EXCLUSION
+echo ====================================================
+
+:: Prompt the user with a timeout
+echo If no input is provided within 15 seconds, the script will automatically proceed with 'y'.
+echo Do you want to add the exclusion for the Simba folder in Windows Defender? (y/n):
+choice /t 15 /d y /c yn >nul
+set "Input=%errorlevel%"
+
+if "%Input%"=="2" (
+    set "UserChoice=n"
+) else (
+    set "UserChoice=y"
+)
+
+if /i "%UserChoice%" neq "y" (
+    echo No changes made.
+    echo.
+    echo WARNING: Without adding the exclusion, Windows Defender may delete Simba64.exe.
+    echo Proceeding with the rest of the script.
+    echo.
+) else (
+    :: Add exclusions using PowerShell
+    echo Adding exclusion for the Simba folder...
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\Simba'"
+    echo Adding exclusion for the SimbaBackupTMP folder...
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\SimbaBackupTMP'"
+    echo Exclusions added successfully!
+)
+
+:: Proceed with the rest of the script
+
 :: Get the current date and time
 setlocal
-set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%time:~0,2%%time:~3,2%"
+set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
 set "datetime=%datetime: =0%"
 
 :: Set the source and destination folders for Simba
@@ -162,7 +195,7 @@ if exist "%simba32Exe%" (
 :: Delete the temporary folder
 if exist "%tempFolder%" (
     rmdir /s /q "%tempFolder%"
-    echo Deleted temporary folder %tempFolder%.
+    echo Deleted temporary folder %tempFolder%..
 )
 
 :: Show backup file directories and filenames
