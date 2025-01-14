@@ -1,3 +1,5 @@
+:: License: Creative Commons Attribution-NonCommercial-NoDerivatives (CC BY-NC-ND)
+
 @echo off
 :: Check if the script is running elevated (admin privileges)
 net session >nul 2>&1
