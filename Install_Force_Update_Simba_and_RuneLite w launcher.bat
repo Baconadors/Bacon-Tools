@@ -9,6 +9,16 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+:: Check if the Simba registry key exists and delete it if it does
+reg query "HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Simba" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Deleting Simba registry key...
+    reg delete "HKEY_CURRENT_USER\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\Simba" /f
+    echo Simba registry key deleted.
+) else (
+    echo Simba registry key does not exist. Skipping deletion.
+)
+
 :: End all Simba and RuneLite processes
 echo Ending all Simba, OSRS, JagexLauncher, and RuneLite processes...
 taskkill /f /im Simba32.exe >nul 2>&1
@@ -43,7 +53,7 @@ if /i "%UserChoice%" neq "y" (
 ) else (
     :: Add exclusions using PowerShell
     echo Adding exclusion for the Simba folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\Simba'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%PROGRAMFILES%\Simba'"
     echo Adding exclusion for the SimbaBackupTMP folder...
     PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\SimbaBackupTMP'"
     echo Exclusions added successfully!
@@ -57,12 +67,13 @@ set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 set "datetime=%datetime: =0%"
 
 :: Set the source and destination folders for Simba
-set "simbaSource=%LOCALAPPDATA%\Simba"
+set "simbaSource=%PROGRAMFILES%\Simba"
 set "simbaZip=%LOCALAPPDATA%\Simba_%datetime%.zip"
 
 :: Create a zip backup for Simba if it exists
 if exist "%simbaSource%" (
-    powershell Compress-Archive -Path "%simbaSource%" -DestinationPath "%simbaZip%"
+    echo Creating a zip backup of Simba...
+    powershell -Command "Compress-Archive -Path '%simbaSource%\*' -DestinationPath '%simbaZip%' -Force"
     echo Backup of Simba completed: %simbaZip%
 ) else (
     echo Simba folder not found. Backup skipped.
@@ -76,7 +87,7 @@ set "runeLiteProfileZip=%LOCALAPPDATA%\runelite_profile_%datetime%.zip"
 
 :: Create a zip backup for RuneLite (from %LOCALAPPDATA%) if it exists
 if exist "%runeLiteSource%" (
-    powershell Compress-Archive -Path "%runeLiteSource%" -DestinationPath "%runeLiteZip%"
+    powershell -Command "Compress-Archive -Path '%runeLiteSource%\*' -DestinationPath '%runeLiteZip%' -Force"
     echo Backup of RuneLite from %LOCALAPPDATA% completed: %runeLiteZip%
 ) else (
     echo RuneLite folder not found. Backup skipped.
@@ -84,7 +95,7 @@ if exist "%runeLiteSource%" (
 
 :: Create a zip backup for .runelite (from %USERPROFILE%) if it exists
 if exist "%runeLiteProfileSource%" (
-    powershell Compress-Archive -Path "%runeLiteProfileSource%" -DestinationPath "%runeLiteProfileZip%"
+    powershell -Command "Compress-Archive -Path '%runeLiteProfileSource%\*' -DestinationPath '%runeLiteProfileZip%' -Force"
     echo Backup of .runelite from %USERPROFILE% completed: %runeLiteProfileZip%
 ) else (
     echo .runelite folder not found. Backup skipped.
@@ -93,7 +104,7 @@ if exist "%runeLiteProfileSource%" (
 :: Delete Simba folder in %LOCALAPPDATA% if it exists
 if exist "%simbaSource%" (
     rmdir /s /q "%simbaSource%"
-    echo Deleted Simba folder in %LOCALAPPDATA%.
+    echo Deleted Simba folder in %PROGRAMFILES%.
 )
 
 :: Run the unins000.exe in RuneLite folder silently
