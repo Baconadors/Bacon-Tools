@@ -40,7 +40,7 @@ if /i "%UserChoice%" neq "y" (
     echo.
 ) else (
     echo Adding exclusion for the Simba folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%PROGRAMFILES%\Simba'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\Simba'"
     echo Exclusions added successfully!
 )
 
