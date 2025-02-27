@@ -53,7 +53,7 @@ if /i "%UserChoice%" neq "y" (
 ) else (
     :: Add exclusions using PowerShell
     echo Adding exclusion for the Simba folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%PROGRAMFILES%\Simba'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\Simba'"
     echo Adding exclusion for the SimbaBackupTMP folder...
     PowerShell -Command "Add-MpPreference -ExclusionPath '%LOCALAPPDATA%\SimbaBackupTMP'"
     echo Exclusions added successfully!
@@ -67,7 +67,7 @@ set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%time:~0,2%%time:~3,2%%time:~6,2%
 set "datetime=%datetime: =0%"
 
 :: Set the source and destination folders for Simba
-set "simbaSource=%PROGRAMFILES%\Simba"
+set "simbaSource=%LOCALAPPDATA%\Simba"
 set "simbaZip=%LOCALAPPDATA%\Simba_%datetime%.zip"
 
 :: Create a zip backup for Simba if it exists
@@ -104,7 +104,7 @@ if exist "%runeLiteProfileSource%" (
 :: Delete Simba folder in %LOCALAPPDATA% if it exists
 if exist "%simbaSource%" (
     rmdir /s /q "%simbaSource%"
-    echo Deleted Simba folder in %PROGRAMFILES%.
+    echo Deleted Simba folder in %LOCALAPPDATA%.
 )
 
 :: Run the unins000.exe in RuneLite folder silently
