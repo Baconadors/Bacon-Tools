@@ -19,11 +19,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fixes git diff error 128 by fetching full history
 
       - name: Get Changed Files
         id: changed
         run: |
-          git fetch origin main
           git diff --name-only HEAD^ HEAD > changed.txt
           cat changed.txt
         continue-on-error: true
