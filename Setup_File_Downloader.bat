@@ -1,4 +1,4 @@
-:: License: Creative Commons Attribution-NonCommercial-NoDerivatives (CC BY-NC-ND)
+:: License: Creative Commons Attribution-NonCommercial-NoDerivatives (CC BY-NC-ND) 
 
 @echo off
 setlocal EnableDelayedExpansion
