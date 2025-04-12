@@ -1,0 +1,76 @@
+name: Smart Update Release Assets
+
+permissions:
+  contents: write
+
+on:
+  push:
+    paths:
+      - 'Automated_Force_Update_Tool.bat'
+      - 'Setup_File_Downloader.bat'
+      - 'Windows_Defender_Exclusion_Tool.bat'
+    branches:
+      - main
+
+jobs:
+  update-assets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Get Changed Files
+        id: changed
+        run: |
+          git fetch origin main
+          git diff --name-only HEAD^ HEAD > changed.txt
+          cat changed.txt
+        continue-on-error: true
+
+      - name: Set Output Variables for Changed Files
+        id: vars
+        run: |
+          changedFiles=$(cat changed.txt)
+          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+
+      - name: Get Latest Release Info
+        id: get_release
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete and Re-upload Changed Files
+        run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+          changedFiles="${{ steps.vars.outputs.changed }}"
+
+          for file in $changedFiles; do
+            echo "Processing $file"
+
+            # Delete existing asset if it exists
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" | jq --arg name "$file" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old asset: $file (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            else
+              echo "No existing asset found for $file"
+            fi
+
+            # Upload new asset
+            echo "Uploading $file to release..."
+            gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Debug Changed Files
+        if: failure()
+        run: |
+          echo "Changed files:"
+          cat changed.txt || echo "No file list found"
