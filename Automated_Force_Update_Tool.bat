@@ -96,11 +96,14 @@ if /i "%UserChoice%" neq "y" (
     echo.
 ) else (
     echo Adding exclusion for the Simba folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%simbaPath%'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath'%simbaPath%"
     echo Adding exclusion for the SimbaBackupTMP folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%tempBackupPath%'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath %tempBackupPath%"
     echo Adding exclusion for the SimbaForceUpdate folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%forceUpdatePath%'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath %forceUpdatePath%"
+    echo Adding exclusion for the Simba Setup...
+    PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Downloads\simba-setup.exe"
+    PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Desktop\simba-setup.exe"
     echo Exclusions added successfully!
 )
 
