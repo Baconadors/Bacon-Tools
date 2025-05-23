@@ -12,9 +12,11 @@ if %errorlevel% neq 0 (
 )
 
 :: Add Windows Defender exclusions silently (excluding RuneLite)
-powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\simba-setup.exe'" >nul 2>&1
-powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\Automated_Force_Update_Tool.bat'" >nul 2>&1
-powershell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\Windows_Defender_Exclusion_Tool.bat'" >nul 2>&1
+PowerShell -Command "Add-MpPreference -ExclusionPath %LOCALAPPDATA%\Simba"
+PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Downloads\simba-setup.exe"
+PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Desktop\simba-setup.exe"
+Powershell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Desktop\Automated_Force_Update_Tool.bat"
+Powershell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Desktop\Windows_Defender_Exclusion_Tool.bat"
 
 :: Display Menu
 echo ============================================
