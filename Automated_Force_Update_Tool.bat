@@ -1,5 +1,5 @@
 :: License: Creative Commons Attribution-NonCommercial-NoDerivatives (CC BY-NC-ND)
- 
+
 @echo off
 :: Check if the script is running elevated (admin privileges)
 net session >nul 2>&1
@@ -205,24 +205,17 @@ if /i "%userInput%"=="y" (
     echo Exiting without unzipping or restoring any Simba files.
 )
 
-:: Ensure Simba64 shortcut is valid (delete incorrect target and recreate)
-echo Checking for Simba64 shortcut on desktop...
-powershell -Command ^
-    "$ws = New-Object -ComObject WScript.Shell; ^
-     $shortcutPath = '%simba64ShortcutPath%'; ^
-     if (Test-Path $shortcutPath) { ^
-         $target = $ws.CreateShortcut($shortcutPath).TargetPath; ^
-         if ($target -ne '%simba64ExePath%') { ^
-             Remove-Item $shortcutPath; ^
-             Write-Host 'Deleted incorrect Simba64 shortcut.' ^
-         } else { ^
-             Write-Host 'Correct Simba64 shortcut already exists.'; exit ^
-         } ^
-     } ^
-     $s = $ws.CreateShortcut($shortcutPath); ^
-     $s.TargetPath = '%simba64ExePath%'; ^
-     $s.Save(); ^
-     Write-Host 'Simba64 shortcut created on desktop.'"
+:: Always recreate Simba64 shortcut on desktop
+if exist "%simba64ShortcutPath%" (
+    del "%simba64ShortcutPath%"
+    echo Deleted existing Simba64 shortcut from desktop.
+) else (
+    echo No existing Simba64 shortcut found. Proceeding to create a new one.
+)
+
+echo Creating shortcut to Simba64.exe on desktop...
+powershell -Command "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath = '%simba64ExePath%'; $s.Save()"
+echo Simba64 shortcut created on desktop.
 
 :: Delete Simba32.exe and shortcut if they exist
 if exist "%simba32ExePath%" (
