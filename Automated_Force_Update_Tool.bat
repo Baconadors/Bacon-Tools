@@ -96,14 +96,14 @@ if /i "%UserChoice%" neq "y" (
     echo.
 ) else (
     echo Adding exclusion for the Simba folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath'%simbaPath%"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%simbaPath%'"
     echo Adding exclusion for the SimbaBackupTMP folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath %tempBackupPath%"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%tempBackupPath%'"
     echo Adding exclusion for the SimbaForceUpdate folder...
-    PowerShell -Command "Add-MpPreference -ExclusionPath %forceUpdatePath%"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%forceUpdatePath%'"
     echo Adding exclusion for the Simba Setup...
-    PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Downloads\simba-setup.exe"
-    PowerShell -Command "Add-MpPreference -ExclusionPath %USERPROFILE%\Desktop\simba-setup.exe"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Downloads\simba-setup.exe'"
+    PowerShell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\simba-setup.exe'"
     echo Exclusions added successfully!
 )
 
@@ -195,8 +195,8 @@ if /i "%userInput%"=="y" (
     if exist "%backupZipPath%" (
         echo Unzipping combined backup...
         powershell -Command "Expand-Archive -Path '%backupZipPath%' -DestinationPath '%tempBackupPath%' -Force"
-        move /y "%tempBackupPath%\Backup_%datetime%\Simba\credentials.simba" "%simbaPath%\"
-        move /y "%tempBackupPath%\Backup_%datetime%\Simba\Configs" "%simbaPath%\Configs"
+        move /y "%tempBackupPath%\Backup_%datetime%\Simba\credentials.simba" "%simbaPath%\" >nul 2>&1
+        move /y "%tempBackupPath%\Backup_%datetime%\Simba\Configs" "%simbaPath%\Configs" >nul 2>&1
         echo Restored Simba credentials and settings.
     ) else (
         echo Combined backup zip not found. Skipping restore.
@@ -205,14 +205,24 @@ if /i "%userInput%"=="y" (
     echo Exiting without unzipping or restoring any Simba files.
 )
 
-:: Create desktop shortcut to Simba64.exe if not exists
-if not exist "%simba64ShortcutPath%" (
-    echo Creating shortcut to Simba64.exe on desktop...
-    powershell "$s = (New-Object -COM WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath = '%simba64ExePath%'; $s.Save()"
-    echo Simba64 shortcut created on desktop.
-) else (
-    echo Simba64 shortcut already exists on desktop.
-)
+:: Ensure Simba64 shortcut is valid (delete incorrect target and recreate)
+echo Checking for Simba64 shortcut on desktop...
+powershell -Command ^
+    "$ws = New-Object -ComObject WScript.Shell; ^
+     $shortcutPath = '%simba64ShortcutPath%'; ^
+     if (Test-Path $shortcutPath) { ^
+         $target = $ws.CreateShortcut($shortcutPath).TargetPath; ^
+         if ($target -ne '%simba64ExePath%') { ^
+             Remove-Item $shortcutPath; ^
+             Write-Host 'Deleted incorrect Simba64 shortcut.' ^
+         } else { ^
+             Write-Host 'Correct Simba64 shortcut already exists.'; exit ^
+         } ^
+     } ^
+     $s = $ws.CreateShortcut($shortcutPath); ^
+     $s.TargetPath = '%simba64ExePath%'; ^
+     $s.Save(); ^
+     Write-Host 'Simba64 shortcut created on desktop.'"
 
 :: Delete Simba32.exe and shortcut if they exist
 if exist "%simba32ExePath%" (
