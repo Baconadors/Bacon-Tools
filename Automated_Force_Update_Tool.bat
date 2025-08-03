@@ -15,8 +15,9 @@ if %errorlevel% neq 0 (
 
 :: Create timestamp
 setlocal
-set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%time:~0,2%%time:~3,2%%time:~6,2%"
-set "datetime=%datetime: =0%"
+set "hour=%time:~0,2%"
+if "%hour:~0,1%"==" " set "hour=0%hour:~1,1%"
+set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%hour%%time:~3,2%%time:~6,2%"
 
 :: Folder paths
 set "simbaPath=%LOCALAPPDATA%\Simba"
@@ -101,9 +102,6 @@ if /i "%UserChoice%" neq "y" (
     PowerShell -Command "Add-MpPreference -ExclusionPath '%tempBackupPath%'"
     echo Adding exclusion for the SimbaForceUpdate folder...
     PowerShell -Command "Add-MpPreference -ExclusionPath '%forceUpdatePath%'"
-    echo Adding exclusion for the Simba Setup...
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Downloads\simba-setup.exe'"
-    PowerShell -Command "Add-MpPreference -ExclusionPath '%USERPROFILE%\Desktop\simba-setup.exe'"
     echo Exclusions added successfully!
 )
 
@@ -129,9 +127,14 @@ if exist "%runeLiteProfilePath%" (
     echo .runelite folder not found. Skipping .runelite backup.
 )
 
-:: Compress entire backup session into single ZIP
-powershell -Command "Compress-Archive -Path '%backupSessionPath%\*' -DestinationPath '%backupZipPath%' -Force"
-echo Combined backup created: %backupZipPath%
+:: Compress entire backup session into single ZIP (only if non-empty)
+powershell -Command ^
+"if (Test-Path '%backupSessionPath%') { " ^
+"  if ((Get-ChildItem '%backupSessionPath%' -Recurse | Measure-Object).Count -gt 0) { " ^
+"    Compress-Archive -Path '%backupSessionPath%\*' -DestinationPath '%backupZipPath%' -Force; " ^
+"    Write-Host 'Combined backup created: %backupZipPath%' " ^
+"  } else { Write-Host 'Backup session folder exists but is empty. Skipping compression.' } " ^
+"} else { Write-Host 'Backup session path does not exist. Skipping compression.' }"
 
 :: Delete Simba folder
 if exist "%simbaPath%" (
@@ -147,9 +150,14 @@ if exist "%runeLiteUninstallerPath%" (
     echo RuneLite uninstaller not found.
 )
 
+:: Ensure ForceUpdate folder exists before downloads
+if not exist "%forceUpdatePath%" (
+    mkdir "%forceUpdatePath%"
+)
+
 :: Download Simba installer
 echo Downloading simba-setup.exe...
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '%simbaSetupPath%'"
+powershell -Command "New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '%simbaSetupPath%'"
 
 if exist "%simbaSetupPath%" (
     echo Running Simba installer silently...
@@ -160,7 +168,7 @@ if exist "%simbaSetupPath%" (
 
 :: Download RuneLite installer
 echo Downloading RuneLiteSetup.exe...
-powershell -Command "Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '%runeLiteSetupPath%'"
+powershell -Command "New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '%runeLiteSetupPath%'"
 
 if exist "%runeLiteSetupPath%" (
     echo Running RuneLite installer silently...
@@ -195,8 +203,8 @@ if /i "%userInput%"=="y" (
     if exist "%backupZipPath%" (
         echo Unzipping combined backup...
         powershell -Command "Expand-Archive -Path '%backupZipPath%' -DestinationPath '%tempBackupPath%' -Force"
-        move /y "%tempBackupPath%\Backup_%datetime%\Simba\credentials.simba" "%simbaPath%\" >nul 2>&1
-        move /y "%tempBackupPath%\Backup_%datetime%\Simba\Configs" "%simbaPath%\Configs" >nul 2>&1
+        move /y "%tempBackupPath%\Backup_%datetime%\Simba\credentials.simba" "%simbaPath%\"
+        move /y "%tempBackupPath%\Backup_%datetime%\Simba\Configs" "%simbaPath%\Configs"
         echo Restored Simba credentials and settings.
     ) else (
         echo Combined backup zip not found. Skipping restore.
@@ -205,17 +213,14 @@ if /i "%userInput%"=="y" (
     echo Exiting without unzipping or restoring any Simba files.
 )
 
-:: Always recreate Simba64 shortcut on desktop
-if exist "%simba64ShortcutPath%" (
-    del "%simba64ShortcutPath%"
-    echo Deleted existing Simba64 shortcut from desktop.
+:: Create desktop shortcut to Simba64.exe if not exists
+if not exist "%simba64ShortcutPath%" (
+    echo Creating shortcut to Simba64.exe on desktop...
+    powershell "$s = (New-Object -COM WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath = '%simba64ExePath%'; $s.Save()"
+    echo Simba64 shortcut created on desktop.
 ) else (
-    echo No existing Simba64 shortcut found. Proceeding to create a new one.
+    echo Simba64 shortcut already exists on desktop.
 )
-
-echo Creating shortcut to Simba64.exe on desktop...
-powershell -Command "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath = '%simba64ExePath%'; $s.Save()"
-echo Simba64 shortcut created on desktop.
 
 :: Delete Simba32.exe and shortcut if they exist
 if exist "%simba32ExePath%" (
