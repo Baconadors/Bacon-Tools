@@ -128,13 +128,7 @@ if exist "%runeLiteProfilePath%" (
 )
 
 :: Compress entire backup session into single ZIP (only if non-empty)
-powershell -Command ^
-"if (Test-Path '%backupSessionPath%') { " ^
-"  if ((Get-ChildItem '%backupSessionPath%' -Recurse | Measure-Object).Count -gt 0) { " ^
-"    Compress-Archive -Path '%backupSessionPath%\*' -DestinationPath '%backupZipPath%' -Force; " ^
-"    Write-Host 'Combined backup created: %backupZipPath%' " ^
-"  } else { Write-Host 'Backup session folder exists but is empty. Skipping compression.' } " ^
-"} else { Write-Host 'Backup session path does not exist. Skipping compression.' }"
+powershell -NoProfile -Command "if (Test-Path '%backupSessionPath%') { if ((Get-ChildItem -Path '%backupSessionPath%' -Recurse | Measure-Object).Count -gt 0) { Compress-Archive -Path '%backupSessionPath%\*' -DestinationPath '%backupZipPath%' -Force; Write-Host 'Combined backup created: %backupZipPath%' } else { Write-Host 'Backup session exists but is empty. Skipping compression.' } } else { Write-Host 'Backup session path does not exist. Skipping compression.' }"
 
 :: Delete Simba folder
 if exist "%simbaPath%" (
