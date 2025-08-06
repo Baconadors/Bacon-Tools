@@ -13,11 +13,9 @@ if %errorlevel% neq 0 (
 :: DEFINE ALL PATHS AND FILENAMES USED IN SCRIPT
 :: =========================================================
 
-:: Create timestamp
-setlocal
-set "hour=%time:~0,2%"
-if "%hour:~0,1%"==" " set "hour=0%hour:~1,1%"
-set "datetime=%date:~-4%%date:~4,2%%date:~7,2%_%hour%%time:~3,2%%time:~6,2%"
+:: Create sanitized, locale-independent timestamp using PowerShell
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss"') do set "datetime=%%I"
+echo Generated datetime: %datetime%
 
 :: Folder paths
 set "simbaPath=%LOCALAPPDATA%\Simba"
@@ -144,14 +142,9 @@ if exist "%runeLiteUninstallerPath%" (
     echo RuneLite uninstaller not found.
 )
 
-:: Ensure ForceUpdate folder exists before downloads
-if not exist "%forceUpdatePath%" (
-    mkdir "%forceUpdatePath%"
-)
-
 :: Download Simba installer
 echo Downloading simba-setup.exe...
-powershell -Command "New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '%simbaSetupPath%'"
+powershell -Command "$ProgressPreference = 'SilentlyContinue'; New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '%simbaSetupPath%'"
 
 if exist "%simbaSetupPath%" (
     echo Running Simba installer silently...
@@ -162,7 +155,7 @@ if exist "%simbaSetupPath%" (
 
 :: Download RuneLite installer
 echo Downloading RuneLiteSetup.exe...
-powershell -Command "New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '%runeLiteSetupPath%'"
+powershell -Command "$ProgressPreference = 'SilentlyContinue'; New-Item -ItemType Directory -Force -Path '%forceUpdatePath%' > $null; Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '%runeLiteSetupPath%'"
 
 if exist "%runeLiteSetupPath%" (
     echo Running RuneLite installer silently...
