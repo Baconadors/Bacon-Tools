@@ -67,7 +67,8 @@ exit /b
 :CheckAdmin
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo [ERROR] This script requires administrative privileges. Run as administrator.
+    echo [ERROR] This script requires administrative privileges. 
+    echo         Right click file -> Run as administrator.
     pause
     exit /b 1
 )
@@ -420,3 +421,4 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
+
