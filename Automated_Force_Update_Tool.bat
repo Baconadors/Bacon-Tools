@@ -120,7 +120,7 @@ call :Log "[INFO] Script complete."
 :: Print finish time
 for /f "tokens=1 delims= " %%a in ('echo %time%') do set "finishtime=%%a"
 set "finishtime=%finishtime:~0,8%"
-echo Run finished at: %finishtime%
+echo Log: "Run finished at: %finishtime%"
 echo Run finished at: %finishtime% >> "%logFile%"
 
 endlocal
@@ -177,7 +177,7 @@ set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
 
 echo Log: "Run started on: %date%"
-echo Log: "Run started on: %date% >> "%logFile%""
+echo Run started on: %date% >> "%logFile%"
 exit /b
 
 :InitLogging
