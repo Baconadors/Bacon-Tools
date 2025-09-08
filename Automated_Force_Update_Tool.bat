@@ -43,6 +43,7 @@ call :PreLog "[INFO] Expected SHA256: %expectedHash%"
 :: Compare
 if /I "%localHash%"=="%expectedHash%" (
     call :PreLog "[INFO] Script is up-to-date."
+	echo.
     goto :cleanupUpdater
 ) else (
     call :PreLog "[WARNING] Script is outdated. Updating..."
@@ -124,7 +125,6 @@ echo Run finished at: %finishtime% >> "%logFile%"
 
 endlocal
 pause
-exit /b
 
 :: ####################################################################
 :: ########################## SUBROUTINES #############################
@@ -176,8 +176,8 @@ set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
 
-echo Run started on: %date%
-echo Run started on: %date% >> "%logFile%"
+echo Log: "Run started on: %date%"
+echo Log: "Run started on: %date% >> "%logFile%""
 exit /b
 
 :InitLogging
@@ -331,6 +331,12 @@ if not exist "%runeLiteSetupPath%" (
 
 call :Log "======================================================"
 call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log ""
+call :Log "            PRESS ANY KEY TO CONTINUE"
 call :Log "======================================================"
 pause >nul
 
