@@ -120,7 +120,8 @@ call :Log "[INFO] Script complete."
 :: Print finish time
 for /f "tokens=1 delims= " %%a in ('echo %time%') do set "finishtime=%%a"
 set "finishtime=%finishtime:~0,8%"
-echo Log: "Run finished at: %finishtime%"
+echo :Log "Run finished at: %finishtime%"
+echo ""
 echo Run finished at: %finishtime% >> "%logFile%"
 
 endlocal
@@ -176,7 +177,8 @@ set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
 
-echo Log: "Run started on: %date%"
+echo :Log "Run started on: %date%"
+echo ""
 echo Run started on: %date% >> "%logFile%"
 exit /b
 
@@ -396,8 +398,6 @@ call :Log "[INFO] Updating profiles.json with new profile: %newProfileName% (ID=
 if exist "%profilesJson%" (
     set "profilesBackup=%profilesJson%.bak_%datetime%"
     copy "%profilesJson%" "%profilesBackup%" >nul
-    call :Log "[INFO] Backed up profiles.json to %profilesBackup%"
-    echo [INFO] Profiles.json backed up to: %profilesBackup%
 )
 
 if not exist "%profilesJson%" (
