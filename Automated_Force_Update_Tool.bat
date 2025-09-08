@@ -3,6 +3,73 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: ==================== AUTO-UPDATER =====================
+set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
+set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
+
+set "thisScript=%~f0"
+set "tmpScript=%TEMP%\Automated_Force_Update_Tool.bat"
+set "tmpHashFile=%TEMP%\Automated_Force_Update_Tool.sha256"
+
+:: Pre-log setup (temporary log path before main logger exists)
+set "preLog=%TEMP%\SimbaForceUpdate_PreLog_%RANDOM%.log"
+
+call :PreLog "[INFO] Starting auto-update check..."
+
+:: Download expected hash with curl
+curl -s -L -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
+if not exist "%tmpHashFile%" (
+    call :PreLog "[ERROR] Could not download remote SHA256 file."
+    exit /b 1
+)
+
+:: Read expected hash (first token only)
+set "expectedHash="
+for /f %%I in ('type "%tmpHashFile%"') do (
+    set "expectedHash=%%I"
+    goto :gotExpected
+)
+:gotExpected
+
+:: Normalize expected hash to uppercase
+for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
+
+:: Compute local hash using PowerShell
+for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
+
+call :PreLog "[INFO] Local SHA256:    %localHash%"
+call :PreLog "[INFO] Expected SHA256: %expectedHash%"
+
+:: Compare
+if /I "%localHash%"=="%expectedHash%" (
+    call :PreLog "[INFO] Script is up-to-date."
+    goto :cleanupUpdater
+) else (
+    call :PreLog "[WARNING] Script is outdated. Updating..."
+
+    curl -s -L -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
+
+    if exist "%tmpScript%" (
+		call :PreLog "[INFO] Script updated. Awaiting user confirmation..."
+		copy /y "%tmpScript%" "%thisScript%" >nul
+		echo.
+		echo Press any key to continue and relaunch the updated script...
+		pause >nul
+		del "%tmpHashFile%" >nul 2>&1
+		del "%tmpScript%" >nul 2>&1
+		start "" "%thisScript%"
+		exit /b
+	) else (
+
+        call :PreLog "[ERROR] Failed to download latest script."
+        goto :cleanupUpdater
+    )
+)
+
+:cleanupUpdater
+del "%tmpHashFile%" >nul 2>&1
+del "%tmpScript%" >nul 2>&1
+
 :: ==================== ADMIN PRIVILEGES CHECK =====================
 call :CheckAdmin || exit /b
 
@@ -59,8 +126,7 @@ endlocal
 pause
 exit /b
 
-
-:: #################################################################### -
+:: ####################################################################
 :: ########################## SUBROUTINES #############################
 :: ####################################################################
 
@@ -119,6 +185,15 @@ if not exist "%backupRootPath%" mkdir "%backupRootPath%"
 echo ===================================================== >> "%logFile%"
 echo  Simba + RuneLite Update Log - %datetime% >> "%logFile%"
 echo ===================================================== >> "%logFile%"
+
+:: Merge updater pre-log into main log (if it exists)
+if exist "%preLog%" (
+    echo === AUTO-UPDATER LOG START === >> "%logFile%"
+    type "%preLog%" >> "%logFile%"
+    echo === AUTO-UPDATER LOG END === >> "%logFile%"
+    del "%preLog%" >nul 2>&1
+)
+
 exit /b
 
 :RotateLogs
@@ -146,8 +221,8 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
 exit /b
 
 :Log
-set "curtime=%time: =0%"          
-set "curtime=%curtime:~0,8%"      
+set "curtime=%time: =0%"
+set "curtime=%curtime:~0,8%"
 echo [%curtime%] %~1
 echo [%curtime%] %~1 >> "%logFile%"
 exit /b
@@ -156,7 +231,7 @@ exit /b
 if not exist "%portable7zDir%" mkdir "%portable7zDir%"
 if not exist "%portable7zPath%" (
     call :Log "[INFO] 7-Zip not found. Downloading..."
-    powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://www.7-zip.org/a/7zr.exe' -OutFile '%portable7zPath%'" >> "%logFile%" 2>&1
+    curl -s -L -o "%portable7zPath%" "https://www.7-zip.org/a/7zr.exe" >> "%logFile%" 2>&1
     if %errorlevel% neq 0 (
         call :Log "[FAILED] Could not download 7-Zip."
     )
@@ -237,7 +312,7 @@ exit /b
 
 :InstallSimba
 call :Log "[INFO] Downloading Simba installer..."
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe' -OutFile '%simbaSetupPath%'" >> "%logFile%" 2>&1
+curl -s -L -o "%simbaSetupPath%" "https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe" >> "%logFile%" 2>&1
 if not exist "%simbaSetupPath%" (
     call :Log "[FAILED] Simba installer download failed."
 ) else (
@@ -247,7 +322,7 @@ exit /b
 
 :InstallRuneLite
 call :Log "[INFO] Downloading RuneLite installer..."
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri 'https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe' -OutFile '%runeLiteSetupPath%'" >> "%logFile%" 2>&1
+curl -s -L -o "%runeLiteSetupPath%" "https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe" >> "%logFile%" 2>&1
 if not exist "%runeLiteSetupPath%" (
     call :Log "[FAILED] RuneLite installer download failed."
 ) else (
@@ -256,12 +331,6 @@ if not exist "%runeLiteSetupPath%" (
 
 call :Log "======================================================"
 call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log ""
-call :Log "            PRESS ANY KEY TO CONTINUE"
 call :Log "======================================================"
 pause >nul
 
@@ -271,7 +340,7 @@ exit /b
 :DownloadWaspProfile
 call :Log "[INFO] Downloading wasp-profile.properties..."
 set "tempWaspFile=%forceUpdatePath%\wasp-profile.properties"
-powershell -Command "$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '%waspProfileURL%' -OutFile '%tempWaspFile%'" >> "%logFile%" 2>&1
+curl -s -L -o "%tempWaspFile%" "%waspProfileURL%" >> "%logFile%" 2>&1
 
 if not exist "%tempWaspFile%" (
     call :Log "[FAILED] Failed to download wasp-profile.properties"
@@ -361,14 +430,22 @@ if exist "%backupZipPath%" (
 
     if exist "%tempBackupPath%\Simba\credentials.simba" (
         move /y "%tempBackupPath%\Simba\credentials.simba" "%simbaPath%\" >> "%logFile%" 2>&1
-        if %errorlevel%==0 (call :Log "[SUCCESS] Restored credentials.simba") else (call :Log "[FAILED] Could not restore credentials.simba")
+        if %errorlevel%==0 (
+            call :Log "[SUCCESS] Restored credentials.simba"
+        ) else (
+            call :Log "[FAILED] Could not restore credentials.simba"
+        )
     ) else (
         call :Log "[WARNING] No credentials.simba found in backup."
     )
 
     if exist "%tempBackupPath%\Simba\Configs" (
         move /y "%tempBackupPath%\Simba\Configs" "%simbaPath%\Configs" >> "%logFile%" 2>&1
-        if %errorlevel%==0 (call :Log "[SUCCESS] Restored Configs directory") else (call :Log "[FAILED] Could not restore Configs directory")
+        if %errorlevel%==0 (
+            call :Log "[SUCCESS] Restored Configs directory"
+        ) else (
+            call :Log "[FAILED] Could not restore Configs directory"
+        )
     ) else (
         call :Log "[WARNING] No Configs directory found in backup."
     )
@@ -386,7 +463,11 @@ exit /b
 call :Log "[INFO] Creating Simba64 desktop shortcut..."
 if not exist "%simba64ShortcutPath%" (
     powershell "$s=(New-Object -COM WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath='%simba64ExePath%'; $s.Save()" >> "%logFile%" 2>&1
-    if %errorlevel%==0 (call :Log "[SUCCESS] Created Simba64 shortcut") else (call :Log "[FAILED] Could not create Simba64 shortcut")
+    if %errorlevel%==0 (
+        call :Log "[SUCCESS] Created Simba64 shortcut"
+    ) else (
+        call :Log "[FAILED] Could not create Simba64 shortcut"
+    )
 )
 if exist "%simba32ExePath%" del "%simba32ExePath%"
 if exist "%simba32ShortcutPath%" del "%simba32ShortcutPath%"
@@ -422,4 +503,13 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
 )
 exit /b
 
+:: ####################################################################
+:: ########################## EXTRA SUBROUTINES #######################
+:: ####################################################################
 
+:PreLog
+set "curtime=%time: =0%"
+set "curtime=%curtime:~0,8%"
+echo [%curtime%] %~1
+echo [%curtime%] %~1 >> "%preLog%"
+exit /b
