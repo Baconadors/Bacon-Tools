@@ -6,7 +6,8 @@ setlocal EnableDelayedExpansion
 :: Check if the script is running elevated (admin privileges)
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo This script requires administrative privileges. Please run as administrator.
+    echo This script requires administrative privileges.
+    echo Right click file -> Run as administrator.
     pause
     exit /b
 )
@@ -114,3 +115,4 @@ if /i "!openfile!"=="y" (
     pause
 )
 exit /b
+
