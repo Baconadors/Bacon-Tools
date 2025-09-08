@@ -44,7 +44,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete and Re-upload Changed Files
+      - name: Delete and Re-upload Changed Files with SHA256
         run: |
           release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
@@ -63,9 +63,23 @@ jobs:
               echo "No existing asset found for $file"
             fi
 
-            # Upload new asset
-            echo "Uploading $file to release..."
-            gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" --clobber
+            # Generate SHA256 checksum file, stripping all extensions
+            baseName=$(basename "$file" | cut -d. -f1)
+            shaFile="$baseName.sha256"
+            sha256sum "$file" | awk '{print $1}' > "$shaFile"
+            echo "Generated SHA256 for $file: $(cat $shaFile)"
+
+            # Delete old checksum asset if it exists
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old checksum asset: $shaFile (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            # Upload new asset and checksum
+            echo "Uploading $file and $shaFile to release..."
+            gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
