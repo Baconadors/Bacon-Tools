@@ -118,11 +118,14 @@ call :Log "[INFO] All backups are stored in: %backupZipPath%"
 call :Log "[INFO] Script complete."
 
 :: Print finish time
-for /f "tokens=1 delims= " %%a in ('echo %time%') do set "finishtime=%%a"
-set "finishtime=%finishtime:~0,8%"
-echo :Log "Run finished at: %finishtime%"
-echo ""
-echo Run finished at: %finishtime% >> "%logFile%"
+for /f "tokens=1-2 delims= " %%a in ('echo %date% %time%') do (
+    set "rundate=%%a"
+    set "runtime=%%b"
+)
+set "runtime=%runtime:~0,8%"
+call :Log "[INFO] Run finished on %rundate% at %runtime%"
+echo. >> "%logFile%"
+
 
 endlocal
 pause
@@ -177,10 +180,16 @@ set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
 
-echo :Log "Run started on: %date%"
-echo ""
-echo Run started on: %date% >> "%logFile%"
-exit /b
+
+:: Print start time
+for /f "tokens=1-2 delims= " %%a in ('echo %date% %time%') do (
+    set "rundate=%%a"
+    set "runtime=%%b"
+)
+set "runtime=%runtime:~0,8%"
+call :Log "[INFO] Run started on %rundate% at %runtime%"
+echo. >> "%logFile%"
+
 
 :InitLogging
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
