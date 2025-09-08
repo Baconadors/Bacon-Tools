@@ -128,7 +128,9 @@ echo. >> "%logFile%"
 
 
 endlocal
-pause
+echo Press any key to finish and exit...
+pause >nul
+exit
 
 :: ####################################################################
 :: ########################## SUBROUTINES #############################
