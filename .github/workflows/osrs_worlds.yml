@@ -43,23 +43,22 @@ jobs:
           worlds = []
           seen = set()
 
-          # Skip header row
           for row in table.find_all("tr")[1:]:
               cells = [c.get_text(strip=True) for c in row.find_all("td")]
               if len(cells) < 3:
                   continue
               world = cells[0]
+              if not world.isdigit():
+                  continue  # skip rows like "Free-to-play"
+
               location = cells[1]
               type_ = cells[2]
-              activity = cells[3] if len(cells) > 3 else ""
 
-              line = f"{world} {location} {type_}".strip()
-              if activity:
-                  line += f" {activity}"
+              line = f"{world} {location} {type_}"
 
               if world not in seen:
                   seen.add(world)
-                  worlds.append(line)
+                  worlds.append((int(world), line))
 
           world_count = len(worlds)
           timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S_UTC")
@@ -68,16 +67,17 @@ jobs:
               print("ERROR: No worlds found — parser failed.")
               sys.exit(1)
 
-          # Sort numerically by world number
-          worlds.sort(key=lambda line: int(line.split()[0]))
+          # Sort and unwrap
+          worlds.sort(key=lambda x: x[0])
+          lines = [line for _, line in worlds]
 
-          # Write main file (committed)
+          # Write committed file
           out_path = pathlib.Path("worlds.txt")
-          out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
+          out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-          # Write timestamped snapshot
+          # Write timestamped snapshot for artifact
           snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
-          snapshot.write_text("\n".join(worlds) + "\n", encoding="utf-8")
+          snapshot.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           print(f"[INFO] Wrote {world_count} worlds from Wiki to {out_path} and snapshot {snapshot}")
 
