@@ -35,39 +35,40 @@ jobs:
 
           soup = BeautifulSoup(resp.text, "lxml")
 
-          table = soup.find("table", {"class": "wikitable"})
-          if not table:
-              print("ERROR: Could not find server list table.")
-              sys.exit(1)
-
           worlds = []
           seen = set()
 
-          for row in table.find_all("tr")[1:]:
-              cells = [c.get_text(strip=True) for c in row.find_all("td")]
-              if len(cells) < 3:
-                  continue
-              world = cells[0]
-              if not world.isdigit():
-                  continue  # skip rows like "Free-to-play"
+          # Find all tables with class wikitable
+          tables = soup.find_all("table", {"class": "wikitable"})
+          if not tables:
+              print("ERROR: Could not find any server list tables.")
+              sys.exit(1)
 
-              location = cells[1]
-              type_ = cells[2]
+          for table in tables:
+              for row in table.find_all("tr")[1:]:
+                  cells = [c.get_text(strip=True) for c in row.find_all("td")]
+                  if len(cells) < 3:
+                      continue
+                  world = cells[0]
+                  if not world.isdigit():
+                      continue  # skip non-world rows
 
-              line = f"{world} {location} {type_}"
+                  location = cells[1]
+                  type_ = cells[2]
 
-              if world not in seen:
-                  seen.add(world)
-                  worlds.append((int(world), line))
+                  line = f"{world} {location} {type_}"
+                  if world not in seen:
+                      seen.add(world)
+                      worlds.append((int(world), line))
 
           world_count = len(worlds)
           timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S_UTC")
 
           if world_count == 0:
-              print("ERROR: No worlds found — parser failed.")
+              print("ERROR: No valid worlds found — parser failed.")
               sys.exit(1)
 
-          # Sort and unwrap
+          # Sort by world number
           worlds.sort(key=lambda x: x[0])
           lines = [line for _, line in worlds]
 
