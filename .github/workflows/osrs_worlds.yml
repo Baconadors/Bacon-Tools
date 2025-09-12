@@ -1,0 +1,64 @@
+name: Update OSRS Active Worlds List
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # once every hour
+  workflow_dispatch:       # allow manual runs
+
+jobs:
+  update-worlds:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml
+
+      - name: Fetch and parse OSRS world list
+        run: |
+          python - <<'EOF'
+          import requests
+          from bs4 import BeautifulSoup
+          import pathlib
+          import re
+
+          url = "https://oldschool.runescape.com/slu"
+          resp = requests.get(url)
+          resp.raise_for_status()
+
+          soup = BeautifulSoup(resp.text, "lxml")
+
+          worlds = []
+          for li in soup.select("li"):
+              text = li.get_text(strip=True)
+              if text.startswith("Old School"):
+                  # Remove "### players"
+                  cleaned = re.sub(r"\b\d+\s+players\b", "", text).strip()
+                  worlds.append(cleaned)
+
+          out_path = pathlib.Path("worlds.txt")
+          out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
+
+          print(f"Wrote {len(worlds)} cleaned worlds to {out_path}")
+          EOF
+
+      - name: Commit changes if needed
+        run: |
+          if git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add worlds.txt
+            git commit -m "Update OSRS world list"
+            git push
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
