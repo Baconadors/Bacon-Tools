@@ -2,7 +2,7 @@ name: Update OSRS World List
 
 on:
   schedule:
-    - cron: "0 * * * *"   # once every hour
+    - cron: "0 7 * * *"   # once per day at 1 AM Central Time (07:00 UTC)
   workflow_dispatch:
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
           python-version: "3.x"
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml
+        run: pip install requests beautifulsoup4 lxml pytz
 
       - name: Fetch and parse OSRS world list from Wiki
         id: parse
@@ -27,7 +27,8 @@ jobs:
           python - <<'EOF'
           import requests, pathlib, sys, os
           from bs4 import BeautifulSoup
-          from datetime import datetime, timezone
+          from datetime import datetime, timezone, timedelta
+          import pytz
 
           url = "https://oldschool.runescape.wiki/w/Server"
           resp = requests.get(url)
@@ -81,6 +82,21 @@ jobs:
           snapshot.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           print(f"[INFO] Wrote {world_count} worlds from Wiki to {out_path} and snapshot {snapshot}")
+
+          # Calculate next run time
+          now = datetime.now(timezone.utc)
+          next_run_utc = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+          if now.hour >= 7:
+              next_run_utc = next_run_utc  # tomorrow at 07:00 UTC
+          else:
+              next_run_utc = now.replace(hour=7, minute=0, second=0, microsecond=0)
+
+          # Convert UTC -> Central
+          central = pytz.timezone("America/Chicago")
+          next_run_central = next_run_utc.astimezone(central)
+
+          print(f"[INFO] Next run scheduled for {next_run_utc.strftime('%Y-%m-%d %H:%M:%S UTC')} "
+                f"({next_run_central.strftime('%Y-%m-%d %I:%M %p %Z')})")
 
           github_output = os.environ.get("GITHUB_OUTPUT")
           if github_output:
