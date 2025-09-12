@@ -64,8 +64,9 @@ jobs:
               echo "No existing asset found for $file"
             fi
 
-            # Generate SHA256 checksum file, stripping all extensions
-            baseName=$(basename "$file" | cut -d. -f1)
+            # Generate SHA256 checksum file (strip ALL extensions)
+            baseName=$(basename "$file")
+            baseName="${baseName%%.*}"   # remove everything after the first dot
             shaFile="$baseName.sha256"
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
             echo "Generated SHA256 for $file: $(cat $shaFile)"
