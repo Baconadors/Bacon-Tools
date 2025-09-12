@@ -64,7 +64,7 @@ jobs:
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          # Write timestamped snapshot
+          # Write timestamped snapshot for artifact
           snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
           snapshot.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
@@ -101,11 +101,4 @@ jobs:
         with:
           name: osrs-worlds-${{ steps.parse.outputs.timestamp }}
           path: worlds-${{ steps.parse.outputs.timestamp }}.txt
-          retention-days: 7   # expire after 7 days
-
-      - name: Cleanup old artifacts (keep last 10)
-        if: always()
-        uses: geekyeggo/delete-artifact@v2
-        with:
-          name: osrs-worlds-*
-          keep-count: 10
+          retention-days: 7
