@@ -10,6 +10,7 @@ on:
       - 'Setup_File_Downloader.bat'
       - 'Windows_Defender_Exclusion_Tool.bat'
       - 'wasp-profile.properties'
+      - 'worlds.txt'
     branches:
       - main
 
