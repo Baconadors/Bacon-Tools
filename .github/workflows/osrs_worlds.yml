@@ -1,4 +1,4 @@
-name: Update OSRS Active Worlds List
+name: Update OSRS World List
 
 on:
   schedule:
@@ -22,12 +22,15 @@ jobs:
         run: pip install requests beautifulsoup4 lxml
 
       - name: Fetch and parse OSRS world list
+        id: parse
         run: |
           python - <<'EOF'
           import requests
           from bs4 import BeautifulSoup
           import pathlib
           import re
+          from datetime import datetime
+          import sys
 
           url = "https://oldschool.runescape.com/slu"
           resp = requests.get(url)
@@ -35,18 +38,43 @@ jobs:
 
           soup = BeautifulSoup(resp.text, "lxml")
 
+          seen = set()
           worlds = []
-          for li in soup.select("li"):
-              text = li.get_text(strip=True)
+
+          # Look through all text nodes
+          for el in soup.find_all(string=True):
+              text = el.strip()
               if text.startswith("Old School"):
                   # Remove "### players"
                   cleaned = re.sub(r"\b\d+\s+players\b", "", text).strip()
-                  worlds.append(cleaned)
+                  # Drop "Old School " prefix
+                  cleaned = re.sub(r"^Old School\s+", "", cleaned)
+                  if cleaned not in seen:
+                      seen.add(cleaned)
+                      worlds.append(cleaned)
+
+          world_count = len(worlds)
+          timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          if world_count == 0:
+              print("ERROR: No worlds were found — parser likely broken.")
+              sys.exit(1)
+
+          # Sort numerically by world number
+          def world_key(line: str):
+              m = re.match(r"(\d+)", line)
+              return int(m.group(1)) if m else 0
+
+          worlds.sort(key=world_key)
 
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          print(f"Wrote {len(worlds)} cleaned worlds to {out_path}")
+          print(f"Wrote {world_count} unique, sorted worlds to {out_path} at {timestamp}")
+
+          # GitHub Actions outputs
+          print(f"::set-output name=world_count::{world_count}")
+          print(f"::set-output name=timestamp::{timestamp}")
           EOF
 
       - name: Commit changes if needed
@@ -57,7 +85,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             git add worlds.txt
-            git commit -m "Update OSRS world list"
+            git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
             git push
           fi
         env:
