@@ -21,31 +21,45 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml
 
-      - name: Fetch and parse OSRS world list
+      - name: Fetch and parse OSRS world list from Wiki
         id: parse
         run: |
           python - <<'EOF'
-          import requests, pathlib, re, sys, os
+          import requests, pathlib, sys, os
           from bs4 import BeautifulSoup
           from datetime import datetime, timezone
 
-          url = "https://oldschool.runescape.com/slu"
+          url = "https://oldschool.runescape.wiki/w/Server"
           resp = requests.get(url)
           resp.raise_for_status()
 
           soup = BeautifulSoup(resp.text, "lxml")
 
-          seen = set()
-          worlds = []
+          table = soup.find("table", {"class": "wikitable"})
+          if not table:
+              print("ERROR: Could not find server list table.")
+              sys.exit(1)
 
-          for el in soup.find_all(string=True):
-              text = el.strip()
-              if text.startswith("Old School"):
-                  cleaned = re.sub(r"\b\d+\s+players\b", "", text).strip()
-                  cleaned = re.sub(r"^Old School\s+", "", cleaned)
-                  if cleaned not in seen:
-                      seen.add(cleaned)
-                      worlds.append(cleaned)
+          worlds = []
+          seen = set()
+
+          # Skip header row
+          for row in table.find_all("tr")[1:]:
+              cells = [c.get_text(strip=True) for c in row.find_all("td")]
+              if len(cells) < 3:
+                  continue
+              world = cells[0]
+              location = cells[1]
+              type_ = cells[2]
+              activity = cells[3] if len(cells) > 3 else ""
+
+              line = f"{world} {location} {type_}".strip()
+              if activity:
+                  line += f" {activity}"
+
+              if world not in seen:
+                  seen.add(world)
+                  worlds.append(line)
 
           world_count = len(worlds)
           timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S_UTC")
@@ -54,21 +68,18 @@ jobs:
               print("ERROR: No worlds found — parser failed.")
               sys.exit(1)
 
-          def world_key(line: str):
-              m = re.match(r"(\d+)", line)
-              return int(m.group(1)) if m else 0
-
-          worlds.sort(key=world_key)
+          # Sort numerically by world number
+          worlds.sort(key=lambda line: int(line.split()[0]))
 
           # Write main file (committed)
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          # Write timestamped snapshot for artifact
+          # Write timestamped snapshot
           snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
           snapshot.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          print(f"[INFO] Wrote {world_count} worlds to {out_path} and snapshot {snapshot}")
+          print(f"[INFO] Wrote {world_count} worlds from Wiki to {out_path} and snapshot {snapshot}")
 
           github_output = os.environ.get("GITHUB_OUTPUT")
           if github_output:
