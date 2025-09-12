@@ -13,15 +13,6 @@
 313 United States (west) 1
 314 United States (east) 1
 315 United States (west) 1
-316 United Kingdom 0
-317 United Kingdom 1
-319 United States (west) 1
-320 United States (west) 1
-321 United States (east) 1
-322 United States (east) 1
-323 United States (west) 1
-324 United States (west) 1
-325 United Kingdom 1
 326 United Kingdom 0
 327 Germany 1
 328 Germany 1
