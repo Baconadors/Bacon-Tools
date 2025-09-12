@@ -1,26 +1,3 @@
-name: Update OSRS World List
-
-on:
-  schedule:
-    - cron: "0 * * * *"   # once every hour
-  workflow_dispatch:       # allow manual runs
-
-jobs:
-  update-worlds:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml
-
       - name: Fetch and parse OSRS world list
         id: parse
         run: |
@@ -29,7 +6,7 @@ jobs:
           from bs4 import BeautifulSoup
           import pathlib
           import re, sys, os
-          from datetime import datetime
+          from datetime import datetime, timezone
 
           url = "https://oldschool.runescape.com/slu"
           resp = requests.get(url)
@@ -50,7 +27,7 @@ jobs:
                       worlds.append(cleaned)
 
           world_count = len(worlds)
-          timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
           if world_count == 0:
               print("ERROR: No worlds were found — parser likely broken.")
@@ -67,26 +44,7 @@ jobs:
 
           print(f"Wrote {world_count} unique, sorted worlds to {out_path} at {timestamp}")
 
-          # Write outputs for next step
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               print(f"world_count={world_count}", file=fh)
               print(f"timestamp={timestamp}", file=fh)
           EOF
-
-      - name: Commit changes if needed
-        run: |
-          if [ ! -f worlds.txt ]; then
-            echo "worlds.txt missing, creating new file..."
-            git add worlds.txt
-          elif git diff --quiet worlds.txt; then
-            echo "No changes in worlds.txt"
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add worlds.txt
-          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
