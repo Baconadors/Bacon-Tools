@@ -28,9 +28,8 @@ jobs:
           import requests
           from bs4 import BeautifulSoup
           import pathlib
-          import re
+          import re, sys, os
           from datetime import datetime
-          import sys
 
           url = "https://oldschool.runescape.com/slu"
           resp = requests.get(url)
@@ -41,13 +40,10 @@ jobs:
           seen = set()
           worlds = []
 
-          # Look through all text nodes
           for el in soup.find_all(string=True):
               text = el.strip()
               if text.startswith("Old School"):
-                  # Remove "### players"
                   cleaned = re.sub(r"\b\d+\s+players\b", "", text).strip()
-                  # Drop "Old School " prefix
                   cleaned = re.sub(r"^Old School\s+", "", cleaned)
                   if cleaned not in seen:
                       seen.add(cleaned)
@@ -60,7 +56,6 @@ jobs:
               print("ERROR: No worlds were found — parser likely broken.")
               sys.exit(1)
 
-          # Sort numerically by world number
           def world_key(line: str):
               m = re.match(r"(\d+)", line)
               return int(m.group(1)) if m else 0
@@ -72,21 +67,26 @@ jobs:
 
           print(f"Wrote {world_count} unique, sorted worlds to {out_path} at {timestamp}")
 
-          # GitHub Actions outputs
-          print(f"::set-output name=world_count::{world_count}")
-          print(f"::set-output name=timestamp::{timestamp}")
+          # Write outputs for next step
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              print(f"world_count={world_count}", file=fh)
+              print(f"timestamp={timestamp}", file=fh)
           EOF
 
       - name: Commit changes if needed
         run: |
-          if git diff --quiet worlds.txt; then
-            echo "No changes in worlds.txt"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ ! -f worlds.txt ]; then
+            echo "worlds.txt missing, creating new file..."
             git add worlds.txt
-            git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
-            git push
+          elif git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+            exit 0
           fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add worlds.txt
+          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
+          git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
