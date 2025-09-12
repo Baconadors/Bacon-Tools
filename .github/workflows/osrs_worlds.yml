@@ -1,11 +1,32 @@
+name: Update OSRS World List
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # once every hour
+  workflow_dispatch:
+
+jobs:
+  update-worlds:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4 lxml
+
       - name: Fetch and parse OSRS world list
         id: parse
         run: |
           python - <<'EOF'
-          import requests
+          import requests, pathlib, re, sys, os
           from bs4 import BeautifulSoup
-          import pathlib
-          import re, sys, os
           from datetime import datetime, timezone
 
           url = "https://oldschool.runescape.com/slu"
@@ -27,10 +48,10 @@
                       worlds.append(cleaned)
 
           world_count = len(worlds)
-          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H%M%S_UTC")
 
           if world_count == 0:
-              print("ERROR: No worlds were found — parser likely broken.")
+              print("ERROR: No worlds found — parser failed.")
               sys.exit(1)
 
           def world_key(line: str):
@@ -39,12 +60,52 @@
 
           worlds.sort(key=world_key)
 
+          # Write main file (committed)
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          print(f"Wrote {world_count} unique, sorted worlds to {out_path} at {timestamp}")
+          # Write timestamped snapshot
+          snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
+          snapshot.write_text("\n".join(worlds) + "\n", encoding="utf-8")
 
-          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
-              print(f"world_count={world_count}", file=fh)
-              print(f"timestamp={timestamp}", file=fh)
+          print(f"[INFO] Wrote {world_count} worlds to {out_path} and snapshot {snapshot}")
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a") as fh:
+                  print(f"world_count={world_count}", file=fh)
+                  print(f"timestamp={timestamp}", file=fh)
           EOF
+
+      - name: Commit changes if needed
+        run: |
+          if [ ! -f worlds.txt ]; then
+            echo "worlds.txt missing, nothing to commit"
+            exit 0
+          elif git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add worlds.txt
+          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload timestamped artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osrs-worlds-${{ steps.parse.outputs.timestamp }}
+          path: worlds-${{ steps.parse.outputs.timestamp }}.txt
+          retention-days: 7   # expire after 7 days
+
+      - name: Cleanup old artifacts (keep last 10)
+        if: always()
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: osrs-worlds-*
+          keep-count: 10
