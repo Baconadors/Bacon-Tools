@@ -73,7 +73,11 @@ jobs:
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-          print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path}")
+          # Write timestamped snapshot for artifact
+          snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
+          snapshot.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path} and snapshot {snapshot}")
 
           # Calculate next run time
           now = datetime.now(timezone.utc)
@@ -94,20 +98,20 @@ jobs:
                   print(f"timestamp={timestamp}", file=fh)
           EOF
 
-      - name: Commit changes if needed
+      - name: Commit updated worlds.txt
         run: |
-          if [ ! -f worlds.txt ]; then
-            echo "worlds.txt missing, nothing to commit"
-            exit 0
-          elif git diff --quiet worlds.txt; then
-            echo "No changes in worlds.txt"
-            exit 0
-          fi
-
           git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add worlds.txt
-          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
+          git commit -m "Update worlds.txt [skip ci]" || echo "No changes to commit"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload timestamped artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: osrs-worlds-${{ steps.parse.outputs.timestamp }}
+          path: worlds-${{ steps.parse.outputs.timestamp }}.txt
+          retention-days: 7
