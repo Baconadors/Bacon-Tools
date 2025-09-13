@@ -1,30 +1,115 @@
-name: Smart Update Release Assets
+name: Update Worlds and Release Assets
 
 on:
-  push:
-    branches:
-      - main   # run on any push to main
+  schedule:
+    - cron: "0 7 * * *"   # once per day at 1 AM Central (07:00 UTC)
+  workflow_dispatch:
 
 permissions:
   contents: write
   actions: read
 
 jobs:
-  update-assets:
+  update-and-release:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Repo
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
-      - name: Show Commit Info
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Python Dependencies
+        run: pip install requests beautifulsoup4 lxml pytz
+
+      - name: Fetch and Parse OSRS World List
+        id: parse
         run: |
-          echo "=== Commit Info ==="
-          echo "Event before: ${{ github.event.before }}"
-          echo "Event after:  ${{ github.sha }}"
-          git log -1 --stat
+          python - <<'EOF'
+          import requests, pathlib, sys, os
+          from bs4 import BeautifulSoup
+          from datetime import datetime, timezone
+
+          url = "https://oldschool.runescape.wiki/w/Server"
+          resp = requests.get(url)
+          resp.raise_for_status()
+
+          soup = BeautifulSoup(resp.text, "lxml")
+
+          worlds = []
+          seen = set()
+
+          tables = soup.find_all("table", {"class": "wikitable"})
+          if not tables:
+              print("ERROR: Could not find any server list tables.")
+              sys.exit(1)
+
+          for table in tables:
+              for row in table.find_all("tr")[1:]:
+                  cells = [c.get_text(strip=True) for c in row.find_all("td")]
+                  if not cells:
+                      continue
+                  world = cells[0]
+                  if not world.isdigit():
+                      continue
+                  if world not in seen:
+                      seen.add(world)
+                      worlds.append(int(world))
+
+          world_count = len(worlds)
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          if world_count == 0:
+              print("ERROR: No valid worlds found — parser failed.")
+              sys.exit(1)
+
+          worlds.sort()
+          lines = [str(w) for w in worlds]
+
+          out_path = pathlib.Path("worlds.txt")
+          out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          print(f"[INFO] Wrote {world_count} worlds to {out_path}")
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a") as fh:
+                  print(f"world_count={world_count}", file=fh)
+                  print(f"timestamp={timestamp}", file=fh)
+          EOF
+
+      - name: Commit Worlds File if Changed
+        run: |
+          if git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+            exit 0
+          fi
+
+          git config user.name "Baconadors"
+          git config user.email "27475467+Baconadors@users.noreply.github.com"
+          git add worlds.txt
+          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
+          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+
+      - name: Get Changed Files
+        id: changed
+        run: |
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --name-only HEAD^ HEAD > changed.txt
+          else
+            echo "" > changed.txt
+          fi
+
+          echo "=== Changed files detected ==="
+          cat changed.txt || true
+
+          changedFiles=$(cat changed.txt | sort -u)
+          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
 
       - name: Get Latest Release Info
         id: get_release
@@ -34,23 +119,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log Release Info
-        run: |
-          echo "=== Release Info ==="
-          echo "Release Tag: ${{ fromJson(steps.get_release.outputs.data).tag_name }}"
-          echo "Release Name: ${{ fromJson(steps.get_release.outputs.data).name }}"
-          echo "Assets URL: ${{ fromJson(steps.get_release.outputs.data).assets_url }}"
-
-      - name: Re-upload All Tracked Files with SHA256
+      - name: Upload Changed Files to Release
         run: |
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+          changedFiles="${{ steps.changed.outputs.changed }}"
+          release_tag=${{ fromJson(steps.get_release.outputs.data).tag_name }}
 
-          tracked="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
+          echo "=== Start Processing Changed Files ==="
+          echo "Changed files: $changedFiles"
+          echo "Release Tag: $release_tag"
 
-          echo "=== Start Processing (ALL FILES) ==="
-          echo "Tracked files: $tracked"
-
-          for file in $tracked; do
+          for file in $changedFiles; do
             if [ ! -f "$file" ]; then
               echo "⚠️ $file not found in repo, skipping"
               continue
@@ -62,8 +141,6 @@ jobs:
             fi
 
             echo "Processing $file"
-            ls -l "$file"
-            head "$file" || true
 
             # Delete old asset if exists
             asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
@@ -93,8 +170,8 @@ jobs:
             fi
 
             # Upload both file and checksum
-            echo "Uploading $file and $shaFile to release ${{ fromJson(steps.get_release.outputs.data).tag_name }}"
-            gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
+            echo "Uploading $file and $shaFile to release $release_tag"
+            gh release upload "$release_tag" "$file" "$shaFile" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
