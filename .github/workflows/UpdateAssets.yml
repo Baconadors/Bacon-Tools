@@ -22,19 +22,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0  # Ensure we have full history and file contents
-
-      - name: Get Changed Files
-        id: changed
-        run: |
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed.txt
-          cat changed.txt
-
-      - name: Set Output Variables for Changed Files
-        id: vars
-        run: |
-          changedFiles=$(cat changed.txt)
-          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+          fetch-depth: 0
 
       - name: Get Latest Release Info
         id: get_release
@@ -44,42 +32,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Changed Files with SHA256
+      - name: Upload Assets with SHA256
         run: |
-          changedFiles="${{ steps.vars.outputs.changed }}"
+          # Explicit list of assets to always refresh
+          files="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
 
-          for file in $changedFiles; do
+          for file in $files; do
             echo "Processing $file"
 
-            # Skip if file missing or deleted
+            # Skip if file missing
             if [ ! -f "$file" ]; then
               echo "⚠️ Skipping $file (not found in working directory)"
               continue
             fi
 
-            # Skip if file is empty
+            # Skip if file empty
             if [ ! -s "$file" ]; then
               echo "⚠️ Skipping $file (empty file)"
               continue
             fi
 
+            echo "File details:"
+            ls -l "$file"
+
             # Generate SHA256 checksum file (strip ALL extensions)
             baseName=$(basename "$file")
-            baseName="${baseName%%.*}"   # remove everything after the FIRST dot
+            baseName="${baseName%%.*}"   # keep only first part before any dot
             shaFile="$baseName.sha256"
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
             echo "Generated SHA256 for $file: $(cat $shaFile)"
 
-            # Upload new asset and checksum (always overwrite)
+            # Upload file + checksum (always overwrite in release)
             echo "Uploading $file and $shaFile to release..."
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Debug Changed Files
-        if: failure()
-        run: |
-          echo "Changed files:"
-          cat changed.txt || echo "No file list found"
