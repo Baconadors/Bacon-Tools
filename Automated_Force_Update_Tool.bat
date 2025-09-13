@@ -236,19 +236,26 @@ exit /b
 :Log
 set "curtime=%time: =0%"
 set "curtime=%curtime:~0,8%"
-echo [%curtime%] %~1
-echo [%curtime%] %~1 >> "%logFile%"
-exit /b
+set "msg=%~1"
 
-:Setup7Zip
-if not exist "%portable7zDir%" mkdir "%portable7zDir%"
-if not exist "%portable7zPath%" (
-    call :Log "[INFO] 7-Zip not found. Downloading..."
-    curl -s -L -o "%portable7zPath%" "https://www.7-zip.org/a/7zr.exe" >> "%logFile%" 2>&1
-    if %errorlevel% neq 0 (
-        call :Log "[FAILED] Could not download 7-Zip."
-    )
+for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
+set "cleanmsg=%msg:[%loglevel%] =%"
+
+if /I "%loglevel%"=="INFO" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor White"
+) else if /I "%loglevel%"=="WARNING" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Yellow"
+) else if /I "%loglevel%"=="SUCCESS" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Green"
+) else if /I "%loglevel%"=="FAILED" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Red"
+) else if /I "%loglevel%"=="BANNER" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Cyan"
+) else (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
 )
+
+echo [%curtime%] %msg% >> "%logFile%"
 exit /b
 
 :CreateFolders
@@ -342,15 +349,15 @@ if not exist "%runeLiteSetupPath%" (
     start "" "%runeLiteSetupPath%" /Silent
 )
 
-call :Log "======================================================"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log ""
-call :Log "            PRESS ANY KEY TO CONTINUE"
-call :Log "======================================================"
+call :Log "[BANNER] ======================================================"
+call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[BANNER] ======================================================"
+call :Log "[BANNER]             PRESS ANY KEY TO CONTINUE"
+call :Log "[BANNER] ======================================================"
 pause >nul
 
 call :DownloadWaspProfile
@@ -527,7 +534,27 @@ exit /b
 :PreLog
 set "curtime=%time: =0%"
 set "curtime=%curtime:~0,8%"
-echo [%curtime%] %~1
-echo [%curtime%] %~1 >> "%preLog%"
+set "msg=%~1"
+
+for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
+set "cleanmsg=%msg:[%loglevel%] =%"
+
+if /I "%loglevel%"=="INFO" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor White"
+) else if /I "%loglevel%"=="WARNING" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Yellow"
+) else if /I "%loglevel%"=="SUCCESS" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Green"
+) else if /I "%loglevel%"=="FAILED" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Red"
+) else if /I "%loglevel%"=="BANNER" (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Cyan"
+) else (
+    powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
+)
+
+echo [%curtime%] %msg% >> "%preLog%"
 exit /b
+
+
 
