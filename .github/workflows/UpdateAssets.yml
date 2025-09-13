@@ -7,7 +7,7 @@ on:
   push:
     branches:
       - main
-    paths:                 # only run on tracked files
+    paths:
       - 'Automated_Force_Update_Tool.bat'
       - 'Setup_File_Downloader.bat'
       - 'Windows_Defender_Exclusion_Tool.bat'
@@ -128,22 +128,24 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Changed Files to Release
+      - name: Upload Changed Files to Release (REST API with Delete)
         run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
-          changedFiles="${{ steps.changed.outputs.changed }}"
-          release_tag=${{ fromJson(steps.get_release.outputs.data).tag_name }}
 
-          echo "=== Start Processing Changed Files ==="
-          echo "Changed files: $changedFiles"
-          echo "Release Tag: $release_tag"
+          echo "=== Release Info ==="
+          echo "Release ID: $release_id"
+          echo "Upload URL: $upload_url"
+          echo "Assets URL: $assets_url"
+
+          changedFiles="${{ steps.changed.outputs.changed }}"
 
           for file in $changedFiles; do
             if [ ! -f "$file" ]; then
               echo "⚠️ $file not found in repo, skipping"
               continue
             fi
-
             if [ ! -s "$file" ]; then
               echo "⚠️ $file is empty, skipping"
               continue
@@ -151,37 +153,34 @@ jobs:
 
             echo "Processing $file"
 
-            # Delete old asset if exists
-            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
-              | jq --arg name "$file" '.[] | select(.name == $name) | .id')
-            if [ -n "$asset_id" ]; then
-              echo "Deleting old asset: $file (ID: $asset_id)"
-              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-            fi
-
             # Generate SHA256
             baseName=$(basename "$file")
-            baseName="${baseName%%.*}"
-            shaFile="$baseName.sha256"
+            baseNameNoExt="${baseName%%.*}"
+            shaFile="$baseNameNoExt.sha256"
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
 
-            echo "--- $shaFile contents ---"
-            cat "$shaFile"
+            for f in "$file" "$shaFile"; do
+              echo "Preparing $f for upload..."
 
-            # Delete old checksum asset if exists
-            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
-              | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
-            if [ -n "$asset_id" ]; then
-              echo "Deleting old checksum asset: $shaFile (ID: $asset_id)"
-              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-            fi
+              # Check if asset exists and delete
+              asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+                | jq --arg name "$(basename "$f")" '.[] | select(.name == $name) | .id')
 
-            # Upload both file and checksum
-            echo "Uploading $file and $shaFile to release $release_tag"
-            gh release upload "$release_tag" "$file" "$shaFile" --clobber
-          done
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              if [ -n "$asset_id" ]; then
+                echo "Deleting old asset: $(basename "$f") (ID: $asset_id)"
+                curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                     "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+              fi
+
+              # Upload new asset
+              echo "Uploading $f ..."
+              curl \
+                -X POST \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Content-Type: application/octet-stream" \
+                --data-binary @"$f" \
+                "$upload_url?name=$(basename "$f")&label=$(basename "$f")" || {
+                  echo "❌ Failed to upload $f"
+                  exit 1
+                }
+            done
