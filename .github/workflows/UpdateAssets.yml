@@ -45,8 +45,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Changed Files with SHA256
+      - name: Delete and Re-upload Changed Files with SHA256
         run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
           changedFiles="${{ steps.vars.outputs.changed }}"
 
           for file in $changedFiles; do
@@ -67,6 +69,17 @@ jobs:
             echo "File details:"
             ls -l "$file"
 
+            # Force delete existing asset (if it exists)
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$file" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old asset: $file (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            else
+              echo "No old asset found for $file"
+            fi
+
             # Generate SHA256 checksum file (strip ALL extensions)
             baseName=$(basename "$file")
             baseName="${baseName%%.*}"
@@ -74,10 +87,25 @@ jobs:
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
             echo "Generated SHA256 for $file: $(cat $shaFile)"
 
-            # Upload file + checksum (overwrite in release)
+            # Force delete old checksum asset (if exists)
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old checksum asset: $shaFile (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            # Upload new asset and checksum
             echo "Uploading $file and $shaFile to release..."
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Debug Changed Files
+        if: failure()
+        run: |
+          echo "Changed files:"
+          cat changed.txt || echo "No file list found"
