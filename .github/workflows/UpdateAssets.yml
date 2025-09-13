@@ -34,6 +34,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log Release Info
+        run: |
+          echo "=== Release Info ==="
+          echo "Release Tag: ${{ fromJson(steps.get_release.outputs.data).tag_name }}"
+          echo "Release Name: ${{ fromJson(steps.get_release.outputs.data).name }}"
+          echo "Assets URL: ${{ fromJson(steps.get_release.outputs.data).assets_url }}"
+
       - name: Re-upload All Tracked Files with SHA256
         run: |
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
@@ -76,7 +83,7 @@ jobs:
             echo "--- $shaFile contents ---"
             cat "$shaFile"
 
-            # Delete old checksum asset
+            # Delete old checksum asset if exists
             asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
               | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
             if [ -n "$asset_id" ]; then
@@ -86,7 +93,7 @@ jobs:
             fi
 
             # Upload both file and checksum
-            echo "Uploading $file and $shaFile"
+            echo "Uploading $file and $shaFile to release ${{ fromJson(steps.get_release.outputs.data).tag_name }}"
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
         env:
