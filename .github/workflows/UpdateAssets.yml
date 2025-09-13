@@ -3,33 +3,15 @@ name: Smart Update Release Assets
 on:
   push:
     branches:
-      - main
-
-    paths:
-      - '**/worlds.txt'
-      - 'Automated_Force_Update_Tool.bat'
-      - 'Setup_File_Downloader.bat'
-      - 'Windows_Defender_Exclusion_Tool.bat'
-      - 'wasp-profile.properties'
+      - main   # run on any push to main
 
 permissions:
   contents: write
-  actions: read  
+  actions: read
 
 jobs:
-  debug:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Show Push Context
-        run: |
-          echo "Triggered by push to ref: ${{ github.ref }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "Changed files (from event payload):"
-          echo "${{ toJson(github.event.commits) }}"
-
   update-assets:
     runs-on: ubuntu-latest
-    needs: debug
 
     steps:
       - name: Checkout Repository
