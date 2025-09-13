@@ -1,9 +1,18 @@
 name: Update Worlds and Release Assets
 
 on:
+  workflow_dispatch:       # manual run
   schedule:
-    - cron: "0 7 * * *"   # once per day at 1 AM Central (07:00 UTC)
-  workflow_dispatch:
+    - cron: "0 7 * * *"    # 1 AM Central (07:00 UTC)
+  push:
+    branches:
+      - main
+    paths:                 # only run on tracked files
+      - 'Automated_Force_Update_Tool.bat'
+      - 'Setup_File_Downloader.bat'
+      - 'Windows_Defender_Exclusion_Tool.bat'
+      - 'wasp-profile.properties'
+      - 'worlds.txt'
 
 permissions:
   contents: write
