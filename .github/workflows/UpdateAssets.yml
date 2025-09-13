@@ -24,6 +24,19 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get Changed Files
+        id: changed
+        run: |
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed.txt
+          echo "Changed files:"
+          cat changed.txt
+
+      - name: Set Output Variables for Changed Files
+        id: vars
+        run: |
+          changedFiles=$(cat changed.txt)
+          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+
       - name: Get Latest Release Info
         id: get_release
         uses: octokit/request-action@v2.x
@@ -32,12 +45,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Assets with SHA256
+      - name: Upload Changed Files with SHA256
         run: |
-          # Explicit list of assets to always refresh
-          files="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
+          changedFiles="${{ steps.vars.outputs.changed }}"
 
-          for file in $files; do
+          for file in $changedFiles; do
             echo "Processing $file"
 
             # Skip if file missing
@@ -57,12 +69,12 @@ jobs:
 
             # Generate SHA256 checksum file (strip ALL extensions)
             baseName=$(basename "$file")
-            baseName="${baseName%%.*}"   # keep only first part before any dot
+            baseName="${baseName%%.*}"
             shaFile="$baseName.sha256"
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
             echo "Generated SHA256 for $file: $(cat $shaFile)"
 
-            # Upload file + checksum (always overwrite in release)
+            # Upload file + checksum (overwrite in release)
             echo "Uploading $file and $shaFile to release..."
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
