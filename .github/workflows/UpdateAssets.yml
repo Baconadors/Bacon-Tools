@@ -1,121 +1,152 @@
-name: Update OSRS World List
+name: Smart Update Release Assets
 
 on:
-  schedule:
-    - cron: "0 7 * * *"   # once per day at 1 AM Central Time (07:00 UTC)
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+    paths:
+      - '**/worlds.txt'
+      - 'Automated_Force_Update_Tool.bat'
+      - 'Setup_File_Downloader.bat'
+      - 'Windows_Defender_Exclusion_Tool.bat'
+      - 'wasp-profile.properties'
 
 permissions:
-  contents: write   # allow commits to trigger other workflows
+  contents: write
+  actions: read  
 
 jobs:
-  update-worlds:
+  debug:
     runs-on: ubuntu-latest
+    steps:
+      - name: Show Push Context
+        run: |
+          echo "Triggered by push to ref: ${{ github.ref }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Changed files (from event payload):"
+          echo "${{ toJson(github.event.commits) }}"
+
+  update-assets:
+    runs-on: ubuntu-latest
+    needs: debug
 
     steps:
-      - name: Checkout repo
+      - name: Checkout Repository
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0   # full history so diffs work
+          fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.x"
-
-      - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml pytz
-
-      - name: Fetch and parse OSRS world list from Wiki
-        id: parse
+      - name: Show Commit Info
         run: |
-          python - <<'EOF'
-          import requests, pathlib, sys, os
-          from bs4 import BeautifulSoup
-          from datetime import datetime, timezone, timedelta
-          import pytz
+          echo "=== Commit Info ==="
+          echo "Event before: ${{ github.event.before }}"
+          echo "Event after:  ${{ github.sha }}"
+          git log -1 --stat
 
-          url = "https://oldschool.runescape.wiki/w/Server"
-          resp = requests.get(url)
-          resp.raise_for_status()
-
-          soup = BeautifulSoup(resp.text, "lxml")
-
-          worlds = []
-          seen = set()
-
-          tables = soup.find_all("table", {"class": "wikitable"})
-          if not tables:
-              print("ERROR: Could not find any server list tables.")
-              sys.exit(1)
-
-          for table in tables:
-              for row in table.find_all("tr")[1:]:
-                  cells = [c.get_text(strip=True) for c in row.find_all("td")]
-                  if not cells:
-                      continue
-                  world = cells[0]
-                  if not world.isdigit():
-                      continue
-
-                  if world not in seen:
-                      seen.add(world)
-                      worlds.append(int(world))
-
-          world_count = len(worlds)
-          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-          if world_count == 0:
-              print("ERROR: No valid worlds found — parser failed.")
-              sys.exit(1)
-
-          worlds.sort()
-          lines = [str(w) for w in worlds]
-
-          out_path = pathlib.Path("worlds.txt")
-          out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-          print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path}")
-
-          now = datetime.now(timezone.utc)
-          next_run_utc = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
-          if now.hour < 7:
-              next_run_utc = now.replace(hour=7, minute=0, second=0, microsecond=0)
-
-          central = pytz.timezone("America/Chicago")
-          next_run_central = next_run_utc.astimezone(central)
-
-          print(f"[INFO] Next run scheduled for {next_run_utc.strftime('%Y-%m-%d %H:%M:%S UTC')} "
-                f"({next_run_central.strftime('%Y-%m-%d %I:%M %p %Z')})")
-
-          github_output = os.environ.get("GITHUB_OUTPUT")
-          if github_output:
-              with open(github_output, "a") as fh:
-                  print(f"world_count={world_count}", file=fh)
-                  print(f"timestamp={timestamp}", file=fh)
-          EOF
-
-      - name: Commit updated worlds.txt
+      - name: Get Changed Files
+        id: changed
         run: |
-          if git diff --quiet worlds.txt; then
-            echo "No changes in worlds.txt"
-            exit 0
+          # Compare against previous commit or fallback to origin/main
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --name-only HEAD^ HEAD > changed.txt
+          else
+            echo "" > changed.txt
           fi
 
-          git config user.name "Baconadors"
-          git config user.email "27475467+Baconadors@users.noreply.github.com"
-          git add worlds.txt
-          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
-          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          if [ ! -s changed.txt ]; then
+            echo "Fallback diff against origin/main"
+            git fetch origin main || true
+            git diff --name-only origin/main...HEAD > changed.txt
+          fi
 
-      - name: Debug Commit
+          echo "=== Changed files detected ==="
+          cat changed.txt
+
+      - name: Set Output Variables for Changed Files
+        id: vars
         run: |
-          echo "=== Debugging Commit Push ==="
-          echo "Branch ref: ${{ github.ref }}"
-          echo "Commit SHA: ${{ github.sha }}"
-          echo "Changed files in last commit:"
-          git diff-tree --no-commit-id --name-only -r HEAD
-          echo "Commit details:"
-          git log -1 --stat
-          echo "worlds.txt contents (first 10 lines):"
-          head -n 10 worlds.txt
+          changedFiles=$(cat changed.txt | sort -u)
+          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+          echo "=== Changed files passed to upload step ==="
+          echo "$changedFiles"
+
+      - name: Get Latest Release Info
+        id: get_release
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete and Re-upload Changed Files with SHA256
+        run: |
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+          changedFiles="${{ steps.vars.outputs.changed }}"
+
+          tracked="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
+
+          echo "=== Start Processing ==="
+          echo "Tracked files: $tracked"
+          echo "Changed files: $changedFiles"
+
+          for file in $changedFiles; do
+            if [[ " $tracked " != *" $file "* ]]; then
+              echo "Skipping $file (not in tracked set)"
+              continue
+            fi
+
+            echo "Processing $file"
+
+            if [ ! -f "$file" ]; then
+              echo "⚠️ $file not found in checkout"
+              continue
+            fi
+
+            if [ ! -s "$file" ]; then
+              echo "⚠️ $file is empty"
+              continue
+            fi
+
+            echo "--- File details ---"
+            ls -l "$file"
+            echo "--- First 10 lines of $file ---"
+            head "$file"
+
+            # Check existing asset
+            echo "Looking for existing asset $file"
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$file" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old asset: $file (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            else
+              echo "No old asset found for $file"
+            fi
+
+            # Generate SHA256
+            baseName=$(basename "$file")
+            baseName="${baseName%%.*}"
+            shaFile="$baseName.sha256"
+            sha256sum "$file" | awk '{print $1}' > "$shaFile"
+
+            echo "--- $shaFile contents ---"
+            cat "$shaFile"
+
+            # Delete old checksum asset
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
+            if [ -n "$asset_id" ]; then
+              echo "Deleting old checksum asset: $shaFile (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            # Upload
+            echo "Uploading $file and $shaFile"
+            gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
