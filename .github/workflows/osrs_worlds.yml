@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write   # still needed for file access
+  contents: write
 
 jobs:
   update-worlds:
@@ -15,8 +15,6 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0   # full history so diffs work
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -44,7 +42,6 @@ jobs:
           worlds = []
           seen = set()
 
-          # Find all tables with class wikitable
           tables = soup.find_all("table", {"class": "wikitable"})
           if not tables:
               print("ERROR: Could not find any server list tables.")
@@ -57,7 +54,7 @@ jobs:
                       continue
                   world = cells[0]
                   if not world.isdigit():
-                      continue  # skip non-world rows
+                      continue
 
                   if world not in seen:
                       seen.add(world)
@@ -70,17 +67,14 @@ jobs:
               print("ERROR: No valid worlds found — parser failed.")
               sys.exit(1)
 
-          # Sort numerically
           worlds.sort()
           lines = [str(w) for w in worlds]
 
-          # Write committed file
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
           print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path}")
 
-          # Calculate next run time
           now = datetime.now(timezone.utc)
           next_run_utc = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
           if now.hour < 7:
@@ -91,23 +85,12 @@ jobs:
 
           print(f"[INFO] Next run scheduled for {next_run_utc.strftime('%Y-%m-%d %H:%M:%S UTC')} "
                 f"({next_run_central.strftime('%Y-%m-%d %I:%M %p %Z')})")
-
-          github_output = os.environ.get("GITHUB_OUTPUT")
-          if github_output:
-              with open(github_output, "a") as fh:
-                  print(f"world_count={world_count}", file=fh)
-                  print(f"timestamp={timestamp}", file=fh)
           EOF
 
-      - name: Commit updated worlds.txt
+      - name: Trigger release workflow manually
         run: |
-          if git diff --quiet worlds.txt; then
-            echo "No changes in worlds.txt"
-            exit 0
-          fi
-
-          git config user.name "YourUsername"
-          git config user.email "your-email@example.com"
-          git add worlds.txt
-          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }} [skip ci]"
-          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/smart-update-release-assets.yml/dispatches \
+            -d '{"ref":"main"}'
