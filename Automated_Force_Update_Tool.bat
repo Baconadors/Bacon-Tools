@@ -242,15 +242,15 @@ for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
 set "cleanmsg=%msg:[%loglevel%] =%"
 
 if /I "%loglevel%"=="INFO" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor White"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [INFO] %cleanmsg%' -ForegroundColor White"
 ) else if /I "%loglevel%"=="WARNING" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Yellow"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [WARNING] %cleanmsg%' -ForegroundColor Yellow"
 ) else if /I "%loglevel%"=="SUCCESS" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Green"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [SUCCESS] %cleanmsg%' -ForegroundColor Green"
 ) else if /I "%loglevel%"=="FAILED" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Red"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [FAILED] %cleanmsg%' -ForegroundColor Red"
 ) else if /I "%loglevel%"=="BANNER" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Cyan"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [BANNER] %cleanmsg%' -ForegroundColor Cyan"
 ) else (
     powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
 )
@@ -540,21 +540,23 @@ for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
 set "cleanmsg=%msg:[%loglevel%] =%"
 
 if /I "%loglevel%"=="INFO" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor White"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [INFO] %cleanmsg%' -ForegroundColor White"
 ) else if /I "%loglevel%"=="WARNING" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Yellow"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [WARNING] %cleanmsg%' -ForegroundColor Yellow"
 ) else if /I "%loglevel%"=="SUCCESS" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Green"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [SUCCESS] %cleanmsg%' -ForegroundColor Green"
 ) else if /I "%loglevel%"=="FAILED" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Red"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [FAILED] %cleanmsg%' -ForegroundColor Red"
 ) else if /I "%loglevel%"=="BANNER" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [%loglevel%] %cleanmsg%' -ForegroundColor Cyan"
+    powershell -NoProfile -Command "Write-Host '[%curtime%] [BANNER] %cleanmsg%' -ForegroundColor Cyan"
 ) else (
     powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
 )
 
 echo [%curtime%] %msg% >> "%preLog%"
 exit /b
+
+
 
 
 
