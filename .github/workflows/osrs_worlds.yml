@@ -107,3 +107,15 @@ jobs:
           git add worlds.txt
           git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
           git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+
+      - name: Debug Commit
+        run: |
+          echo "=== Debugging Commit Push ==="
+          echo "Branch ref: ${{ github.ref }}"
+          echo "Commit SHA: ${{ github.sha }}"
+          echo "Changed files in last commit:"
+          git diff-tree --no-commit-id --name-only -r HEAD
+          echo "Commit details:"
+          git log -1 --stat
+          echo "worlds.txt contents (first 10 lines):"
+          head -n 10 worlds.txt
