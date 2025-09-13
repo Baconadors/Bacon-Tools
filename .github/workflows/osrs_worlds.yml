@@ -5,6 +5,9 @@ on:
     - cron: "0 7 * * *"   # once per day at 1 AM Central Time (07:00 UTC)
   workflow_dispatch:
 
+permissions:
+  contents: write   # allow commits to trigger other workflows
+
 jobs:
   update-worlds:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0   # full history so diffs work
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -48,7 +53,7 @@ jobs:
           for table in tables:
               for row in table.find_all("tr")[1:]:
                   cells = [c.get_text(strip=True) for c in row.find_all("td")]
-                  if len(cells) < 1:
+                  if not cells:
                       continue
                   world = cells[0]
                   if not world.isdigit():
@@ -96,11 +101,15 @@ jobs:
 
       - name: Commit updated worlds.txt
         run: |
+          if git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+            exit 0
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add worlds.txt
-          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }} [skip ci]" \
-            || echo "No changes to commit"
+          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }} [skip ci]"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
