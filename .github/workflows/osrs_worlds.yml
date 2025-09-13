@@ -73,11 +73,7 @@ jobs:
           out_path = pathlib.Path("worlds.txt")
           out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-          # Write timestamped snapshot for artifact
-          snapshot = pathlib.Path(f"worlds-{timestamp}.txt")
-          snapshot.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-          print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path} and snapshot {snapshot}")
+          print(f"[INFO] Wrote {world_count} worlds (numbers only) to {out_path}")
 
           # Calculate next run time
           now = datetime.now(timezone.utc)
@@ -115,11 +111,3 @@ jobs:
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload timestamped artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: osrs-worlds-${{ steps.parse.outputs.timestamp }}
-          path: worlds-${{ steps.parse.outputs.timestamp }}.txt
-          retention-days: 7
