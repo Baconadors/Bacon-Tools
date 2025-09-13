@@ -27,7 +27,7 @@ jobs:
       - name: Get Changed Files
         id: changed
         run: |
-          git diff-tree --no-commit-id --name-only -r ${{ github.sha }} > changed.txt
+          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed.txt
           cat changed.txt
 
       - name: Set Output Variables for Changed Files
@@ -44,35 +44,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete and Re-upload Changed Files with SHA256
+      - name: Upload Changed Files with SHA256
         run: |
-          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
-          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
           changedFiles="${{ steps.vars.outputs.changed }}"
 
           for file in $changedFiles; do
             echo "Processing $file"
 
-            # Skip if file was deleted or doesn't exist
+            # Skip if file missing or deleted
             if [ ! -f "$file" ]; then
               echo "⚠️ Skipping $file (not found in working directory)"
               continue
             fi
 
-            # Skip if file is empty (0 bytes)
+            # Skip if file is empty
             if [ ! -s "$file" ]; then
               echo "⚠️ Skipping $file (empty file)"
               continue
-            fi
-
-            # Delete existing asset if it exists
-            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" | jq --arg name "$file" '.[] | select(.name == $name) | .id')
-            if [ -n "$asset_id" ]; then
-              echo "Deleting old asset: $file (ID: $asset_id)"
-              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-            else
-              echo "No existing asset found for $file"
             fi
 
             # Generate SHA256 checksum file (strip ALL extensions)
@@ -82,15 +70,7 @@ jobs:
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
             echo "Generated SHA256 for $file: $(cat $shaFile)"
 
-            # Delete old checksum asset if it exists
-            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
-            if [ -n "$asset_id" ]; then
-              echo "Deleting old checksum asset: $shaFile (ID: $asset_id)"
-              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-            fi
-
-            # Upload new asset and checksum
+            # Upload new asset and checksum (always overwrite)
             echo "Uploading $file and $shaFile to release..."
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
