@@ -26,33 +26,6 @@ jobs:
           echo "Event after:  ${{ github.sha }}"
           git log -1 --stat
 
-      - name: Get Changed Files
-        id: changed
-        run: |
-          # Compare against previous commit or fallback to origin/main
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            git diff --name-only HEAD^ HEAD > changed.txt
-          else
-            echo "" > changed.txt
-          fi
-
-          if [ ! -s changed.txt ]; then
-            echo "Fallback diff against origin/main"
-            git fetch origin main || true
-            git diff --name-only origin/main...HEAD > changed.txt
-          fi
-
-          echo "=== Changed files detected ==="
-          cat changed.txt
-
-      - name: Set Output Variables for Changed Files
-        id: vars
-        run: |
-          changedFiles=$(cat changed.txt | sort -u)
-          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
-          echo "=== Changed files passed to upload step ==="
-          echo "$changedFiles"
-
       - name: Get Latest Release Info
         id: get_release
         uses: octokit/request-action@v2.x
@@ -61,50 +34,37 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Delete and Re-upload Changed Files with SHA256
+      - name: Re-upload All Tracked Files with SHA256
         run: |
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
-          changedFiles="${{ steps.vars.outputs.changed }}"
 
           tracked="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
 
-          echo "=== Start Processing ==="
+          echo "=== Start Processing (ALL FILES) ==="
           echo "Tracked files: $tracked"
-          echo "Changed files: $changedFiles"
 
-          for file in $changedFiles; do
-            if [[ " $tracked " != *" $file "* ]]; then
-              echo "Skipping $file (not in tracked set)"
-              continue
-            fi
-
-            echo "Processing $file"
-
+          for file in $tracked; do
             if [ ! -f "$file" ]; then
-              echo "⚠️ $file not found in checkout"
+              echo "⚠️ $file not found in repo, skipping"
               continue
             fi
 
             if [ ! -s "$file" ]; then
-              echo "⚠️ $file is empty"
+              echo "⚠️ $file is empty, skipping"
               continue
             fi
 
-            echo "--- File details ---"
+            echo "Processing $file"
             ls -l "$file"
-            echo "--- First 10 lines of $file ---"
-            head "$file"
+            head "$file" || true
 
-            # Check existing asset
-            echo "Looking for existing asset $file"
+            # Delete old asset if exists
             asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
               | jq --arg name "$file" '.[] | select(.name == $name) | .id')
             if [ -n "$asset_id" ]; then
               echo "Deleting old asset: $file (ID: $asset_id)"
               curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                    "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-            else
-              echo "No old asset found for $file"
             fi
 
             # Generate SHA256
@@ -125,7 +85,7 @@ jobs:
                    "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
             fi
 
-            # Upload
+            # Upload both file and checksum
             echo "Uploading $file and $shaFile"
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
