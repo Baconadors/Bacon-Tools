@@ -24,18 +24,38 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Show Commit Info
+        run: |
+          echo "=== Commit Info ==="
+          echo "Event before: ${{ github.event.before }}"
+          echo "Event after:  ${{ github.sha }}"
+          git log -1 --stat
+
       - name: Get Changed Files
         id: changed
         run: |
-          git diff --name-only ${{ github.event.before }} ${{ github.sha }} > changed.txt
-          echo "Changed files:"
+          if git rev-parse HEAD^ >/dev/null 2>&1; then
+            git diff --name-only HEAD^ HEAD > changed.txt
+          else
+            echo "" > changed.txt
+          fi
+
+          if [ ! -s changed.txt ]; then
+            echo "Fallback diff against origin/main"
+            git fetch origin main
+            git diff --name-only origin/main...HEAD > changed.txt
+          fi
+
+          echo "=== Changed files detected ==="
           cat changed.txt
 
       - name: Set Output Variables for Changed Files
         id: vars
         run: |
-          changedFiles=$(cat changed.txt)
+          changedFiles=$(cat changed.txt | sort -u)
           echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+          echo "=== Changed files passed to upload step ==="
+          echo "$changedFiles"
 
       - name: Get Latest Release Info
         id: get_release
@@ -47,29 +67,40 @@ jobs:
 
       - name: Delete and Re-upload Changed Files with SHA256
         run: |
-          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
           changedFiles="${{ steps.vars.outputs.changed }}"
 
+          tracked="Automated_Force_Update_Tool.bat Setup_File_Downloader.bat Windows_Defender_Exclusion_Tool.bat wasp-profile.properties worlds.txt"
+
+          echo "=== Start Processing ==="
+          echo "Tracked files: $tracked"
+          echo "Changed files: $changedFiles"
+
           for file in $changedFiles; do
+            if [[ " $tracked " != *" $file "* ]]; then
+              echo "Skipping $file (not in tracked set)"
+              continue
+            fi
+
             echo "Processing $file"
 
-            # Skip if file missing
             if [ ! -f "$file" ]; then
-              echo "⚠️ Skipping $file (not found in working directory)"
+              echo "⚠️ $file not found in checkout"
               continue
             fi
 
-            # Skip if file empty
             if [ ! -s "$file" ]; then
-              echo "⚠️ Skipping $file (empty file)"
+              echo "⚠️ $file is empty"
               continue
             fi
 
-            echo "File details:"
+            echo "--- File details ---"
             ls -l "$file"
+            echo "--- First 10 lines of $file ---"
+            head "$file"
 
-            # Force delete existing asset (if it exists)
+            # Check existing asset
+            echo "Looking for existing asset $file"
             asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
               | jq --arg name "$file" '.[] | select(.name == $name) | .id')
             if [ -n "$asset_id" ]; then
@@ -80,14 +111,16 @@ jobs:
               echo "No old asset found for $file"
             fi
 
-            # Generate SHA256 checksum file (strip ALL extensions)
+            # Generate SHA256
             baseName=$(basename "$file")
             baseName="${baseName%%.*}"
             shaFile="$baseName.sha256"
             sha256sum "$file" | awk '{print $1}' > "$shaFile"
-            echo "Generated SHA256 for $file: $(cat $shaFile)"
 
-            # Force delete old checksum asset (if exists)
+            echo "--- $shaFile contents ---"
+            cat "$shaFile"
+
+            # Delete old checksum asset
             asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
               | jq --arg name "$shaFile" '.[] | select(.name == $name) | .id')
             if [ -n "$asset_id" ]; then
@@ -96,16 +129,10 @@ jobs:
                    "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
             fi
 
-            # Upload new asset and checksum
-            echo "Uploading $file and $shaFile to release..."
+            # Upload
+            echo "Uploading $file and $shaFile"
             gh release upload ${{ fromJson(steps.get_release.outputs.data).tag_name }} "$file" "$shaFile" --clobber
           done
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Debug Changed Files
-        if: failure()
-        run: |
-          echo "Changed files:"
-          cat changed.txt || echo "No file list found"
