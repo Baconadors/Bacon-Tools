@@ -3,74 +3,6 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: ==================== AUTO-UPDATER =====================
-set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
-set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
-
-set "thisScript=%~f0"
-set "tmpScript=%TEMP%\Automated_Force_Update_Tool.bat"
-set "tmpHashFile=%TEMP%\Automated_Force_Update_Tool.sha256"
-
-:: Pre-log setup (temporary log path before main logger exists)
-set "preLog=%TEMP%\SimbaForceUpdate_PreLog_%RANDOM%.log"
-
-call :PreLog "[INFO] Starting auto-update check..."
-
-:: Download expected hash with curl
-curl -s -L -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
-if not exist "%tmpHashFile%" (
-    call :PreLog "[ERROR] Could not download remote SHA256 file."
-    exit /b 1
-)
-
-:: Read expected hash (first token only)
-set "expectedHash="
-for /f %%I in ('type "%tmpHashFile%"') do (
-    set "expectedHash=%%I"
-    goto :gotExpected
-)
-:gotExpected
-
-:: Normalize expected hash to uppercase
-for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
-
-:: Compute local hash using PowerShell
-for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
-
-call :PreLog "[INFO] Local SHA256:    %localHash%"
-call :PreLog "[INFO] Expected SHA256: %expectedHash%"
-
-:: Compare
-if /I "%localHash%"=="%expectedHash%" (
-    call :PreLog "[INFO] Script is up-to-date."
-	echo.
-    goto :cleanupUpdater
-) else (
-    call :PreLog "[WARNING] Script is outdated. Updating..."
-
-    curl -s -L -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
-
-    if exist "%tmpScript%" (
-		call :PreLog "[INFO] Script updated. Awaiting user confirmation..."
-		copy /y "%tmpScript%" "%thisScript%" >nul
-		echo.
-		echo Press any key to continue and relaunch the updated script...
-		pause >nul
-		del "%tmpHashFile%" >nul 2>&1
-		del "%tmpScript%" >nul 2>&1
-		start "" "%thisScript%"
-		exit /b
-	) else (
-
-        call :PreLog "[ERROR] Failed to download latest script."
-        goto :cleanupUpdater
-    )
-)
-
-:cleanupUpdater
-del "%tmpHashFile%" >nul 2>&1
-del "%tmpScript%" >nul 2>&1
-
 :: ==================== ADMIN PRIVILEGES CHECK =====================
 call :CheckAdmin || exit /b
 
@@ -118,14 +50,9 @@ call :Log "[INFO] All backups are stored in: %backupZipPath%"
 call :Log "[INFO] Script complete."
 
 :: Print finish time
-for /f "tokens=1-2 delims= " %%a in ('echo %date% %time%') do (
-    set "rundate=%%a"
-    set "runtime=%%b"
-)
-set "runtime=%runtime:~0,8%"
-call :Log "[INFO] Run finished on %rundate% at %runtime%"
+for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
+call :Log "[DONE] Run finished on %rundate%"
 echo. >> "%logFile%"
-
 
 endlocal
 echo Press any key to finish and exit...
@@ -133,7 +60,7 @@ pause >nul
 exit
 
 :: ####################################################################
-:: ########################## SUBROUTINES ##############################
+:: ########################## SUBROUTINES #############################
 :: ####################################################################
 
 :CheckAdmin
@@ -147,9 +74,9 @@ if %errorlevel% neq 0 (
 exit /b 0
 
 :DefinePaths
-for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd_HHmmss" 2^>nul') do set "datetime=%%I"
+for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format ddMMyyyy_HHmmss" 2^>nul') do set "datetime=%%I"
 if not defined datetime (
-    set "datetime=%DATE:~10,4%%DATE:~4,2%%DATE:~7,2%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
+    set "datetime=%DATE:~7,2%%DATE:~4,2%%DATE:~10,4%_%TIME:~0,2%%TIME:~3,2%%TIME:~6,2%"
     set "datetime=!datetime: =0!"
 )
 
@@ -182,16 +109,11 @@ set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
 
-
 :: Print start time
-for /f "tokens=1-2 delims= " %%a in ('echo %date% %time%') do (
-    set "rundate=%%a"
-    set "runtime=%%b"
-)
-set "runtime=%runtime:~0,8%"
-call :Log "[INFO] Run started on %rundate% at %runtime%"
+for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
+call :Log "[STRT] Run started on %rundate%"
 echo. >> "%logFile%"
-
+exit /b
 
 :InitLogging
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
@@ -206,7 +128,44 @@ if exist "%preLog%" (
     echo === AUTO-UPDATER LOG END === >> "%logFile%"
     del "%preLog%" >nul 2>&1
 )
+exit /b
 
+:Log
+set "msg=%~1"
+set "curtime=%time: =0%"
+set "curtime=%curtime:~0,8%"
+
+set "color=White"
+echo %msg% | find "[INFO]"    >nul && set "color=White"
+echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
+echo %msg% | find "[FAILED]"  >nul && set "color=Red"
+echo %msg% | find "[ERROR]"   >nul && set "color=Red"
+echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
+echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
+echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
+
+powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
+
+echo [%curtime%] %msg% >> "%logFile%"
+exit /b
+
+:PreLog
+set "msg=%~1"
+set "curtime=%time: =0%"
+set "curtime=%curtime:~0,8%"
+
+set "color=White"
+echo %msg% | find "[INFO]"    >nul && set "color=White"
+echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
+echo %msg% | find "[FAILED]"  >nul && set "color=Red"
+echo %msg% | find "[ERROR]"   >nul && set "color=Red"
+echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
+echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
+echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
+
+powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
+
+echo [%curtime%] %msg% >> "%preLog%"
 exit /b
 
 :RotateLogs
@@ -233,29 +192,15 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
 )
 exit /b
 
-:Log
-set "curtime=%time: =0%"
-set "curtime=%curtime:~0,8%"
-set "msg=%~1"
-
-for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
-set "cleanmsg=%msg:[%loglevel%] =%"
-
-if /I "%loglevel%"=="INFO" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [INFO] %cleanmsg%' -ForegroundColor White"
-) else if /I "%loglevel%"=="WARNING" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [WARNING] %cleanmsg%' -ForegroundColor Yellow"
-) else if /I "%loglevel%"=="SUCCESS" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [SUCCESS] %cleanmsg%' -ForegroundColor Green"
-) else if /I "%loglevel%"=="FAILED" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [FAILED] %cleanmsg%' -ForegroundColor Red"
-) else if /I "%loglevel%"=="BANNER" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [BANNER] %cleanmsg%' -ForegroundColor Cyan"
-) else (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
+:Setup7Zip
+if not exist "%portable7zDir%" mkdir "%portable7zDir%"
+if not exist "%portable7zPath%" (
+    call :Log "[INFO] 7-Zip not found. Downloading..."
+    curl -s -L -o "%portable7zPath%" "https://www.7-zip.org/a/7zr.exe" >> "%logFile%" 2>&1
+    if %errorlevel% neq 0 (
+        call :Log "[FAILED] Could not download 7-Zip."
+    )
 )
-
-echo [%curtime%] %msg% >> "%logFile%"
 exit /b
 
 :CreateFolders
@@ -349,15 +294,15 @@ if not exist "%runeLiteSetupPath%" (
     start "" "%runeLiteSetupPath%" /Silent
 )
 
-call :Log "[BANNER] ======================================================"
-call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[BANNER] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[BANNER] ======================================================"
-call :Log "[BANNER]             PRESS ANY KEY TO CONTINUE"
-call :Log "[BANNER] ======================================================"
+call :Log "[WARN] ======================================================"
+call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
+call :Log "[WARN] ======================================================"
+call :Log "[WARN]             PRESS ANY KEY TO CONTINUE"
+call :Log "[WARN] ======================================================"
 pause >nul
 
 call :DownloadWaspProfile
@@ -389,23 +334,35 @@ for /l %%i in (1,1,8) do (
 :: Compute ID
 for /f %%I in ('powershell -NoProfile -Command "[int[]]([char[]]'!name!') | Measure-Object -Sum | %%{$_.Sum}"') do set "id=%%I"
 
-set "finalWaspFile=%runeLiteProfiles2%\!name!-!id!.properties"
-if exist "!finalWaspFile!" del "!finalWaspFile!"
-move /y "%tempWaspFile%" "!finalWaspFile!" >> "%logFile%" 2>&1
-if %errorlevel% neq 0 (
-    call :Log "[FAILED] Could not save wasp-profile.properties."
+:: Build final file path (no delayed expansion here)
+set "finalWaspFile=%runeLiteProfiles2%\%name%-%id%.properties"
+
+if exist "%finalWaspFile%" del "%finalWaspFile%"
+
+:: Use copy + delete instead of move
+copy /y "%tempWaspFile%" "%finalWaspFile%" >> "%logFile%" 2>&1
+if exist "%finalWaspFile%" (
+    del "%tempWaspFile%" >nul 2>&1
+    call :Log "[SUCCESS] wasp-profile.properties saved as %name%-%id%.properties"
+) else (
+    call :Log "[FAILED] Could not save wasp-profile.properties to %finalWaspFile%"
     exit /b
 )
-call :Log "[SUCCESS] wasp-profile.properties saved as !name!-!id!.properties"
 
-powershell -NoProfile -Command ^
-  "(Get-Content '!finalWaspFile!') -replace '=true','=false' | Set-Content '!finalWaspFile!' -Encoding UTF8"
-if %errorlevel% neq 0 (
-    call :Log "[FAILED] Could not disable plugins in !finalWaspFile!"
+:: Disable plugins only if file exists
+if exist "%finalWaspFile%" (
+    powershell -NoProfile -Command ^
+      "(Get-Content '%finalWaspFile%') -replace '=true','=false' | Set-Content '%finalWaspFile%' -Encoding UTF8"
+    if %errorlevel% neq 0 (
+        call :Log "[FAILED] Could not disable plugins in %finalWaspFile%"
+    ) else (
+        call :Log "[INFO] Forced all plugin states to disabled in %finalWaspFile%"
+    )
+) else (
+    call :Log "[FAILED] Skipped plugin disabling: file not found."
 )
-call :Log "[INFO] Forced all plugin states to disabled in !finalWaspFile!"
 
-call :UpdateProfilesJson "!name!" "!id!"
+call :UpdateProfilesJson "%name%" "%id%"
 exit /b
 
 :UpdateProfilesJson
@@ -460,7 +417,7 @@ if exist "%backupZipPath%" (
             call :Log "[FAILED] Could not restore credentials.simba"
         )
     ) else (
-        call :Log "[WARNING] No credentials.simba found in backup."
+        call :Log "[WARN] No credentials.simba found in backup."
     )
 
     if exist "%tempBackupPath%\Simba\Configs" (
@@ -471,7 +428,7 @@ if exist "%backupZipPath%" (
             call :Log "[FAILED] Could not restore Configs directory"
         )
     ) else (
-        call :Log "[WARNING] No Configs directory found in backup."
+        call :Log "[WARN] No Configs directory found in backup."
     )
 
     if exist "%tempBackupPath%" (
@@ -479,7 +436,7 @@ if exist "%backupZipPath%" (
         call :Log "[INFO] Cleaned up extracted temp backup"
     )
 ) else (
-    call :Log "[WARNING] No backup archive found. Skipping restore."
+    call :Log "[WARN] No backup archive found. Skipping restore."
 )
 exit /b
 
@@ -526,37 +483,3 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
-
-:: ####################################################################
-:: ########################## EXTRA SUBROUTINES #######################
-:: ####################################################################
-
-:PreLog
-set "curtime=%time: =0%"
-set "curtime=%curtime:~0,8%"
-set "msg=%~1"
-
-for /f "tokens=2 delims=[]" %%L in ("%msg%") do set "loglevel=%%L"
-set "cleanmsg=%msg:[%loglevel%] =%"
-
-if /I "%loglevel%"=="INFO" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [INFO] %cleanmsg%' -ForegroundColor White"
-) else if /I "%loglevel%"=="WARNING" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [WARNING] %cleanmsg%' -ForegroundColor Yellow"
-) else if /I "%loglevel%"=="SUCCESS" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [SUCCESS] %cleanmsg%' -ForegroundColor Green"
-) else if /I "%loglevel%"=="FAILED" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [FAILED] %cleanmsg%' -ForegroundColor Red"
-) else if /I "%loglevel%"=="BANNER" (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] [BANNER] %cleanmsg%' -ForegroundColor Cyan"
-) else (
-    powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
-)
-
-echo [%curtime%] %msg% >> "%preLog%"
-exit /b
-
-
-
-
-
