@@ -3,6 +3,74 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: ==================== AUTO-UPDATER =====================
+set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
+set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
+
+set "thisScript=%~f0"
+set "tmpScript=%TEMP%\Automated_Force_Update_Tool.bat"
+set "tmpHashFile=%TEMP%\Automated_Force_Update_Tool.sha256"
+
+:: Pre-log setup (temporary log path before main logger exists)
+set "preLog=%TEMP%\SimbaForceUpdate_PreLog_%RANDOM%.log"
+
+call :PreLog "[INFO] Starting auto-update check..."
+
+:: Download expected hash with curl
+curl -s -L -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
+if not exist "%tmpHashFile%" (
+    call :PreLog "[ERROR] Could not download remote SHA256 file."
+    exit /b 1
+)
+
+:: Read expected hash (first token only)
+set "expectedHash="
+for /f %%I in ('type "%tmpHashFile%"') do (
+    set "expectedHash=%%I"
+    goto :gotExpected
+)
+:gotExpected
+
+:: Normalize expected hash to uppercase
+for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
+
+:: Compute local hash using PowerShell
+for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
+
+call :PreLog "[INFO] Local SHA256:    %localHash%"
+call :PreLog "[INFO] Expected SHA256: %expectedHash%"
+
+:: Compare
+if /I "%localHash%"=="%expectedHash%" (
+    call :PreLog "[INFO] Script is up-to-date."
+	echo.
+    goto :cleanupUpdater
+) else (
+    call :PreLog "[WARNING] Script is outdated. Updating..."
+
+    curl -s -L -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
+
+    if exist "%tmpScript%" (
+		call :PreLog "[INFO] Script updated. Awaiting user confirmation..."
+		copy /y "%tmpScript%" "%thisScript%" >nul
+		echo.
+		echo Press any key to continue and relaunch the updated script...
+		pause >nul
+		del "%tmpHashFile%" >nul 2>&1
+		del "%tmpScript%" >nul 2>&1
+		start "" "%thisScript%"
+		exit /b
+	) else (
+
+        call :PreLog "[ERROR] Failed to download latest script."
+        goto :cleanupUpdater
+    )
+)
+
+:cleanupUpdater
+del "%tmpHashFile%" >nul 2>&1
+del "%tmpScript%" >nul 2>&1
+
 :: ==================== ADMIN PRIVILEGES CHECK =====================
 call :CheckAdmin || exit /b
 
