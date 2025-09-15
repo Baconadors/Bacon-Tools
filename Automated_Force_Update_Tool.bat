@@ -61,7 +61,6 @@ if /I "%localHash%"=="%expectedHash%" (
 		start "" "%thisScript%"
 		exit /b
 	) else (
-
         call :PreLog "[ERROR] Failed to download latest script."
         goto :cleanupUpdater
     )
@@ -297,19 +296,54 @@ exit /b
 
 :AddDefenderExclusions
 call :Log "[INFO] Adding Defender exclusions..."
-powershell -Command "Add-MpPreference -ExclusionPath '%simbaPath%'" >> "%logFile%" 2>&1
-if %errorlevel% neq 0 call :Log "[FAILED] Could not add Defender exclusion for Simba."
 
+set "failFlag=0"
+
+:: Simba exclusion
+powershell -Command "Add-MpPreference -ExclusionPath '%simbaPath%'" >> "%logFile%" 2>&1
+if %errorlevel% neq 0 (
+    call :Log "[FAILED] Could not add Defender exclusion for Simba folder"
+    set "failFlag=1"
+)
+
+:: TempBackup exclusion
 powershell -Command "Add-MpPreference -ExclusionPath '%tempBackupPath%'" >> "%logFile%" 2>&1
+if %errorlevel% neq 0 (
+    call :Log "[FAILED] Could not add Defender exclusion for temp backup folder"
+    set "failFlag=1"
+)
+
+:: ForceUpdate exclusion
 powershell -Command "Add-MpPreference -ExclusionPath '%forceUpdatePath%'" >> "%logFile%" 2>&1
+if %errorlevel% neq 0 (
+    call :Log "[FAILED] Could not add Defender exclusion for force update folder"
+    set "failFlag=1"
+)
+
+:: If all succeeded, show a single success message
+if %failFlag%==0 (
+    call :Log "[SUCCESS] Defender exclusions added successfully"
+)
+
 exit /b
 
 :BackupData
 call :Log "[INFO] Backing up existing data..."
-xcopy /s /e /y "%simbaPath%" "%backupSessionPath%\Simba\" >> "%logFile%" 2>&1
-xcopy /s /e /y "%runeLitePath%" "%backupSessionPath%\RuneLite\" >> "%logFile%" 2>&1
-xcopy /s /e /y "%runeLiteProfilePath%" "%backupSessionPath%\.runelite\" >> "%logFile%" 2>&1
-if %errorlevel% neq 0 call :Log "[FAILED] One or more folders could not be backed up."
+
+if exist "%simbaPath%" (
+    xcopy /s /e /y "%simbaPath%" "%backupSessionPath%\Simba\" >> "%logFile%" 2>&1
+    call :Log "[SUCCESS] Backed up Simba folder"
+) else (
+    call :Log "[WARN] Simba folder not found, skipping backup"
+)
+
+if exist "%runeLiteProfilePath%" (
+    xcopy /s /e /y "%runeLiteProfilePath%" "%backupSessionPath%\.runelite\" >> "%logFile%" 2>&1
+    call :Log "[SUCCESS] Backed up .runelite folder"
+) else (
+    call :Log "[WARN] .runelite folder not found, skipping backup"
+)
+
 exit /b
 
 :CompressBackup
@@ -318,7 +352,7 @@ if exist "%portable7zPath%" (
     "%portable7zPath%" a -t7z -mx1 "%backupZipPath%" "%backupSessionPath%\*" >> "%logFile%" 2>&1
     if exist "%backupZipPath%" (
         call :Log "[SUCCESS] Backup created: %backupZipPath%"
-        rmdir /s /q "%backupSessionPath%"
+        REM Keep backupSessionPath for restore
     ) else (
         call :Log "[FAILED] Compression failed."
     )
@@ -345,6 +379,10 @@ exit /b
 
 :InstallSimba
 call :Log "[INFO] Downloading Simba installer..."
+
+:: Delete all old Simba installers in forceUpdatePath
+del /q "%forceUpdatePath%\simba-setup_*.exe" >nul 2>&1
+
 curl -s -L -o "%simbaSetupPath%" "https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe" >> "%logFile%" 2>&1
 if not exist "%simbaSetupPath%" (
     call :Log "[FAILED] Simba installer download failed."
@@ -355,6 +393,10 @@ exit /b
 
 :InstallRuneLite
 call :Log "[INFO] Downloading RuneLite installer..."
+
+:: Delete all old RuneLite installers in forceUpdatePath
+del /q "%forceUpdatePath%\RuneLiteSetup_*.exe" >nul 2>&1
+
 curl -s -L -o "%runeLiteSetupPath%" "https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe" >> "%logFile%" 2>&1
 if not exist "%runeLiteSetupPath%" (
     call :Log "[FAILED] RuneLite installer download failed."
@@ -471,14 +513,11 @@ exit /b
 
 :AutoRestore
 call :Log "[INFO] Checking for backup files to restore..."
-if exist "%backupZipPath%" (
-    call :Log "[INFO] Extracting backup archive..."
-    if not exist "%tempBackupPath%" mkdir "%tempBackupPath%"
-    "%portable7zPath%" x -y -o"%tempBackupPath%" "%backupZipPath%" >> "%logFile%" 2>&1
-    if %errorlevel% neq 0 call :Log "[FAILED] Extraction failed."
+if exist "%backupSessionPath%" (
+    call :Log "[INFO] Restoring files from backup session folder..."
 
-    if exist "%tempBackupPath%\Simba\credentials.simba" (
-        move /y "%tempBackupPath%\Simba\credentials.simba" "%simbaPath%\" >> "%logFile%" 2>&1
+    if exist "%backupSessionPath%\Simba\credentials.simba" (
+        copy /y "%backupSessionPath%\Simba\credentials.simba" "%simbaPath%\" >> "%logFile%" 2>&1
         if %errorlevel%==0 (
             call :Log "[SUCCESS] Restored credentials.simba"
         ) else (
@@ -488,8 +527,8 @@ if exist "%backupZipPath%" (
         call :Log "[WARN] No credentials.simba found in backup."
     )
 
-    if exist "%tempBackupPath%\Simba\Configs" (
-        move /y "%tempBackupPath%\Simba\Configs" "%simbaPath%\Configs" >> "%logFile%" 2>&1
+    if exist "%backupSessionPath%\Simba\Configs" (
+        xcopy /s /e /y "%backupSessionPath%\Simba\Configs" "%simbaPath%\Configs\" >> "%logFile%" 2>&1
         if %errorlevel%==0 (
             call :Log "[SUCCESS] Restored Configs directory"
         ) else (
@@ -498,13 +537,8 @@ if exist "%backupZipPath%" (
     ) else (
         call :Log "[WARN] No Configs directory found in backup."
     )
-
-    if exist "%tempBackupPath%" (
-        rmdir /s /q "%tempBackupPath%"
-        call :Log "[INFO] Cleaned up extracted temp backup"
-    )
 ) else (
-    call :Log "[WARN] No backup archive found. Skipping restore."
+    call :Log "[WARN] No uncompressed backup folder found. Skipping restore."
 )
 exit /b
 
@@ -527,6 +561,12 @@ call :Log "[INFO] Cleaning up installers and temp files..."
 if exist "%simbaSetupPath%" del "%simbaSetupPath%"
 if exist "%runeLiteSetupPath%" del "%runeLiteSetupPath%"
 if exist "%tempBackupPath%" rmdir /s /q "%tempBackupPath%"
+
+:: Delete uncompressed backup session folder (dual strategy cleanup)
+if exist "%backupSessionPath%" (
+    rmdir /s /q "%backupSessionPath%"
+    call :Log "[INFO] Deleted temporary backup session folder"
+)
 
 :: Delete stray folders in backup root
 for /d %%D in ("%backupRootPath%\*") do (
