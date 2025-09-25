@@ -23,6 +23,9 @@ if /I "%debugUpdateBat%"=="true" (
     set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
     set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
 
+    :: Ensure the log folder exists before writing
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+
     call :PreLog "[INFO] Starting script auto-update check..."
 
     :: Download expected hash with explicit curl
