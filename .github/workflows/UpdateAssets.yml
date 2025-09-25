@@ -108,10 +108,15 @@ jobs:
       - name: Get Changed Files
         id: changed
         run: |
+          # Make sure we have full history
+          git fetch --prune --unshallow || true
+
           if git rev-parse HEAD^ >/dev/null 2>&1; then
+            echo "Comparing against HEAD^"
             git diff --name-only HEAD^ HEAD > changed.txt
           else
-            echo "" > changed.txt
+            echo "First commit on branch, using git show"
+            git show --pretty="" --name-only HEAD > changed.txt
           fi
 
           echo "=== Changed files detected ==="
@@ -119,6 +124,9 @@ jobs:
 
           changedFiles=$(cat changed.txt | sort -u)
           echo "changed=$changedFiles" >> $GITHUB_OUTPUT
+
+          echo "=== Changed files (output variable) ==="
+          echo "$changedFiles"
 
       - name: Get Latest Release Info
         id: get_release
@@ -140,6 +148,8 @@ jobs:
           echo "Assets URL: $assets_url"
 
           changedFiles="${{ steps.changed.outputs.changed }}"
+          echo "=== Files that will be processed for upload ==="
+          echo "$changedFiles"
 
           for file in $changedFiles; do
             if [ ! -f "$file" ]; then
