@@ -437,13 +437,8 @@ echo [%curtime%] %msg% >> "%logFile%"
 exit /b
 
 :PreLog
-:: %~1 = log file path
-:: %*  = all arguments
-setlocal
-set "logFile=%~1"
-:: shift off the first arg (log file), leaving the full message
-shift
-set "msg=%*"
+:: %~1 = message
+set "msg=%~1"
 set "curtime=%time: =0%"
 set "curtime=%curtime:~0,8%"
 
@@ -457,14 +452,20 @@ echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
 echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
 echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 
-:: Print to console
+:: Print to console with color
 powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
 
-:: Append to chosen log file
+:: Append to global log if available
 if defined logFile echo [%curtime%] %msg% >> "%logFile%"
 
-endlocal
+:: Append to updater-specific prelog if one is active
+if defined preBatLog     echo [%curtime%] %msg% >> "%preBatLog%"
+if defined preWorldsLog  echo [%curtime%] %msg% >> "%preWorldsLog%"
+if defined preProfileLog echo [%curtime%] %msg% >> "%preProfileLog%"
+if defined preSettingsLog echo [%curtime%] %msg% >> "%preSettingsLog%"
+
 exit /b
+
 
 :RotateLogs
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
