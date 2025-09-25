@@ -23,12 +23,12 @@ if /I "%debugUpdateBat%"=="true" (
     set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
     set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
 
-    call :PreLog "%preLog%" "[INFO] Starting script auto-update check..."
+    call :PreLog %preLog% [INFO] Starting script auto-update check...
 
     :: Download expected hash with explicit curl
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "%preLog%" "[ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%"
+        call :PreLog %preLog% [ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%
         set "doBatUpdate=0"
     ) else (
         set "doBatUpdate=1"
@@ -41,40 +41,33 @@ if "%doBatUpdate%"=="1" goto runBatUpdater
 goto batUpdaterEnd
 
 :runBatUpdater
-:: Read and normalize expected hash (only first non-empty line)
+:: Read and normalize expected hash (ignore blank lines)
 set "expectedHash="
-if exist "%tmpHashFile%" (
-    for /f %%I in ('type "%tmpHashFile%"') do (
-        if not defined expectedHash set "expectedHash=%%I"
-    )
-    for /f %%U in ('echo !expectedHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
-) else (
-    call :PreLog "%preLog%" "[ERROR] Expected hash file not found: %tmpHashFile%"
-    goto batUpdaterEnd
-)
+for /f "usebackq delims=" %%I in (`findstr /r /v "^$" "%tmpHashFile%"`) do set "expectedHash=%%I"
+for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
 
 :: Compute local hash
 for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
 
-call :PreLog "%preLog%" "[INFO] Local SHA256:    %localHash%"
-call :PreLog "%preLog%" "[INFO] Expected SHA256: %expectedHash%"
+call :PreLog %preLog% [INFO] Local SHA256:    %localHash%
+call :PreLog %preLog% [INFO] Expected SHA256: %expectedHash%
 
 if /I "%localHash%"=="%expectedHash%" (
-    call :PreLog "%preLog%" "[INFO] Script is up-to-date."
+    call :PreLog %preLog% [INFO] Script is up-to-date.
 ) else (
-    call :PreLog "%preLog%" "[WARNING] Script is outdated. Updating..."
+    call :PreLog %preLog% [WARNING] Script is outdated. Updating...
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "%preLog%" "[ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%"
+        call :PreLog %preLog% [ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%
     ) else if exist "%tmpScript%" (
-        call :PreLog "%preLog%" "[INFO] Script updated. Relaunching..."
+        call :PreLog %preLog% [INFO] Script updated. Relaunching...
         copy /y "%tmpScript%" "%thisScript%" >nul
         del "%tmpHashFile%" >nul 2>&1
         del "%tmpScript%" >nul 2>&1
         start "" "%thisScript%"
         exit /b
     ) else (
-        call :PreLog "%preLog%" "[ERROR] Failed to download latest script."
+        call :PreLog %preLog% [ERROR] Failed to download latest script.
     )
 )
 del "%tmpHashFile%" >nul 2>&1
@@ -82,6 +75,7 @@ del "%tmpScript%" >nul 2>&1
 goto batUpdaterEnd
 
 :batUpdaterEnd
+
 
 :: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
@@ -442,12 +436,16 @@ echo [%curtime%] %msg% >> "%logFile%"
 exit /b
 
 :PreLog
-:: %~1 = message
-set "msg=%~1"
+:: %1 = log file path
+:: %* = all arguments (after shift)
+setlocal
+set "logFile=%~1"
+shift
+set "msg=%*"
 set "curtime=%time: =0%"
 set "curtime=%curtime:~0,8%"
 
-:: Pick color based on tags
+:: Pick color
 set "color=White"
 echo %msg% | find "[INFO]"    >nul && set "color=White"
 echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
@@ -457,20 +455,14 @@ echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
 echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
 echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 
-:: Print to console with color
+:: Print to console
 powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
 
-:: Append to global log if available
-if defined logFile echo [%curtime%] %msg% >> "%logFile%"
+:: Append to log file
+>>"%logFile%" echo [%curtime%] %msg%
 
-:: Append to updater-specific prelog if one is active
-if defined preBatLog     echo [%curtime%] %msg% >> "%preBatLog%"
-if defined preWorldsLog  echo [%curtime%] %msg% >> "%preWorldsLog%"
-if defined preProfileLog echo [%curtime%] %msg% >> "%preProfileLog%"
-if defined preSettingsLog echo [%curtime%] %msg% >> "%preSettingsLog%"
-
+endlocal
 exit /b
-
 
 :RotateLogs
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
