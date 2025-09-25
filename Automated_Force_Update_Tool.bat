@@ -14,67 +14,76 @@ set "debugUpdateSettings=true"
 if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
 
 :: ==================== AUTO-UPDATER (BATCH SCRIPT) =====================
+set "batFile=%~f0"
+set "batTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.bat"
+set "batHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
+set "batUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
+set "tmpBatHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
+set "preBatLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaBatUpdate_PreLog_%RANDOM%.log"
+
 if /I "%debugUpdateBat%"=="true" (
-    set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
-    set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
+    call :PreLog "%preBatLog%" [INFO] Starting script auto-update check...
 
-    set "thisScript=%~f0"
-    set "tmpScript=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.bat"
-    set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
-    set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
+        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+        if %errorlevel% neq 0 (
+            call :PreLog "%preBatLog%" [ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate
+            set "doBatUpdate=0"
+            goto BatUpdaterEnd
+        )
+    )
 
-    call :PreLog "%preLog%" [INFO] Starting script auto-update check...
-
-    :: Download expected hash with explicit curl
-    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpBatHashFile%" "%batHashUrl%" >> "%preBatLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "%preLog%" [ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%
+        call :PreLog "%preBatLog%" [ERROR] curl failed (code %errorlevel%) when downloading %batHashUrl%
         set "doBatUpdate=0"
-    ) else (
+    ) else if exist "%tmpBatHashFile%" (
         set "doBatUpdate=1"
+    ) else (
+        set "doBatUpdate=0"
     )
 ) else (
     set "doBatUpdate=0"
 )
 
-if "%doBatUpdate%"=="1" goto runBatUpdater
-goto batUpdaterEnd
+if "%doBatUpdate%"=="1" goto BatRunUpdater
+goto BatUpdaterEnd
 
-:runBatUpdater
-:: Read and normalize expected hash (ignore blank lines)
-set "expectedHash="
-for /f "usebackq delims=" %%I in (`findstr /r /v "^$" "%tmpHashFile%"`) do set "expectedHash=%%I"
-for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
+:BatRunUpdater
+set "expectedBatHash="
+for /f "usebackq delims=" %%I in (`findstr /r /v "^$" "%tmpBatHashFile%"`) do set "expectedBatHash=%%I"
+for /f %%U in ('echo %expectedBatHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedBatHash=%%U"
 
-:: Compute local hash
-for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
+for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%batFile%').Hash.ToUpper()"`) do set "localBatHash=%%I"
 
-call :PreLog "%preLog%" [INFO] Local SHA256:    %localHash%
-call :PreLog "%preLog%" [INFO] Expected SHA256: %expectedHash%
+call :PreLog "%preBatLog%" [INFO] Local SHA256:    %localBatHash%
+call :PreLog "%preBatLog%" [INFO] Expected SHA256: %expectedBatHash%
 
-if /I "%localHash%"=="%expectedHash%" (
-    call :PreLog "%preLog%" [INFO] Script is up-to-date.
+if /I "%localBatHash%"=="%expectedBatHash%" (
+    call :PreLog "%preBatLog%" [INFO] Script is up-to-date.
 ) else (
-    call :PreLog "%preLog%" [WARNING] Script is outdated. Updating...
-    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
+    call :PreLog "%preBatLog%" [WARNING] Script is outdated. Updating...
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%batTmpFile%" "%batUrl%" >> "%preBatLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "%preLog%" [ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%
-    ) else if exist "%tmpScript%" (
-        call :PreLog "%preLog%" [INFO] Script updated. Relaunching...
-        copy /y "%tmpScript%" "%thisScript%" >nul
-        del "%tmpHashFile%" >nul 2>&1
-        del "%tmpScript%" >nul 2>&1
-        start "" "%thisScript%"
+        call :PreLog "%preBatLog%" [ERROR] curl failed (code %errorlevel%) when downloading %batUrl%
+    ) else if exist "%batTmpFile%" (
+        call :PreLog "%preBatLog%" [INFO] Script updated. Relaunching...
+        copy /y "%batTmpFile%" "%batFile%" >nul
+        del "%tmpBatHashFile%" >nul 2>&1
+        del "%batTmpFile%" >nul 2>&1
+        start "" "%batFile%"
         exit /b
     ) else (
-        call :PreLog "%preLog%" [ERROR] Failed to download latest script.
+        call :PreLog "%preBatLog%" [ERROR] Failed to download latest script.
     )
 )
-del "%tmpHashFile%" >nul 2>&1
-del "%tmpScript%" >nul 2>&1
-goto batUpdaterEnd
 
-:batUpdaterEnd
+del "%tmpBatHashFile%" >nul 2>&1
+del "%batTmpFile%" >nul 2>&1
+goto BatUpdaterEnd
+
+:BatUpdaterEnd
+
 
 :: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
