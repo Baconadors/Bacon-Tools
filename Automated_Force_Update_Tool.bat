@@ -23,25 +23,18 @@ if /I "%debugUpdateBat%"=="true" (
     set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
     set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
 
-    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
-        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
-        if %errorlevel% neq 0 (
-            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
-            set "doBatUpdate=0"
-            goto batUpdaterEnd
-        )
-    )
+    call :PreLog "%preLog%" "[INFO] Starting script auto-update check..."
 
     :: Download expected hash first
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%"
+        call :PreLog "%preLog%" "[ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%"
         set "doBatUpdate=0"
-        goto batUpdaterEnd
+    ) else if exist "%tmpHashFile%" (
+        set "doBatUpdate=1"
+    ) else (
+        set "doBatUpdate=0"
     )
-
-    call :PreLog "[INFO] Starting script auto-update check..."
-    set "doBatUpdate=1"
 ) else (
     set "doBatUpdate=0"
 )
@@ -58,25 +51,25 @@ for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.To
 :: Compute local hash
 for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
 
-call :PreLog "[INFO] Local SHA256:    %localHash%"
-call :PreLog "[INFO] Expected SHA256: %expectedHash%"
+call :PreLog "%preLog%" "[INFO] Local SHA256:    %localHash%"
+call :PreLog "%preLog%" "[INFO] Expected SHA256: %expectedHash%"
 
 if /I "%localHash%"=="%expectedHash%" (
-    call :PreLog "[INFO] Script is up-to-date."
+    call :PreLog "%preLog%" "[INFO] Script is up-to-date."
 ) else (
-    call :PreLog "[WARNING] Script is outdated. Updating..."
+    call :PreLog "%preLog%" "[WARNING] Script is outdated. Updating..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%"
+        call :PreLog "%preLog%" "[ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%"
     ) else if exist "%tmpScript%" (
-        call :PreLog "[INFO] Script updated. Relaunching..."
+        call :PreLog "%preLog%" "[INFO] Script updated. Relaunching..."
         copy /y "%tmpScript%" "%thisScript%" >nul
         del "%tmpHashFile%" >nul 2>&1
         del "%tmpScript%" >nul 2>&1
         start "" "%thisScript%"
         exit /b
     ) else (
-        call :PreLog "[ERROR] Failed to download latest script."
+        call :PreLog "%preLog%" "[ERROR] Failed to download latest script."
     )
 )
 del "%tmpHashFile%" >nul 2>&1
