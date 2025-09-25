@@ -3,72 +3,151 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: ==================== AUTO-UPDATER =====================
-set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
-set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
+:: ==================== DEBUG TOGGLES =====================
+:: Toggle these for debugging individual updaters
+set "debugUpdateBat=false"
+set "debugUpdateWorlds=true"
 
-set "thisScript=%~f0"
-set "tmpScript=%TEMP%\Automated_Force_Update_Tool.bat"
-set "tmpHashFile=%TEMP%\Automated_Force_Update_Tool.sha256"
+:: Ensure force update folder exists before updaters
+if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
 
-:: Pre-log setup (temporary log path before main logger exists)
-set "preLog=%TEMP%\SimbaForceUpdate_PreLog_%RANDOM%.log"
+:: ==================== AUTO-UPDATER (BATCH SCRIPT) =====================
+if /I "%debugUpdateBat%"=="true" (
+    set "latestScriptUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
+    set "latestHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
 
-call :PreLog "[INFO] Starting auto-update check..."
+    set "thisScript=%~f0"
+    set "tmpScript=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.bat"
+    set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
+    set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
 
-:: Download expected hash with curl
-curl -s -L -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
-if not exist "%tmpHashFile%" (
-    call :PreLog "[ERROR] Could not download remote SHA256 file."
-    exit /b 1
+    call :PreLog "[INFO] Starting script auto-update check..."
+
+    :: Download expected hash with explicit curl
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%"
+        set "doBatUpdate=0"
+    ) else (
+        set "doBatUpdate=1"
+    )
+) else (
+    set "doBatUpdate=0"
 )
 
-:: Read expected hash (first token only)
+if "%doBatUpdate%"=="1" goto runBatUpdater
+goto batUpdaterEnd
+
+:runBatUpdater
+:: Read and normalize expected hash
 set "expectedHash="
-for /f %%I in ('type "%tmpHashFile%"') do (
-    set "expectedHash=%%I"
-    goto :gotExpected
-)
-:gotExpected
-
-:: Normalize expected hash to uppercase
+for /f %%I in ('type "%tmpHashFile%"') do set "expectedHash=%%I"
 for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedHash=%%U"
 
-:: Compute local hash using PowerShell
+:: Compute local hash
 for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
 
 call :PreLog "[INFO] Local SHA256:    %localHash%"
 call :PreLog "[INFO] Expected SHA256: %expectedHash%"
 
-:: Compare
 if /I "%localHash%"=="%expectedHash%" (
     call :PreLog "[INFO] Script is up-to-date."
-	echo.
-    goto :cleanupUpdater
 ) else (
     call :PreLog "[WARNING] Script is outdated. Updating..."
-
-    curl -s -L -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
-
-    if exist "%tmpScript%" (
-		call :PreLog "[INFO] Script updated. Awaiting user confirmation..."
-		copy /y "%tmpScript%" "%thisScript%" >nul
-		echo.
-		echo Press any key to continue and relaunch the updated script...
-		pause >nul
-		del "%tmpHashFile%" >nul 2>&1
-		del "%tmpScript%" >nul 2>&1
-		start "" "%thisScript%"
-		exit /b
-	) else (
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%"
+    ) else if exist "%tmpScript%" (
+        call :PreLog "[INFO] Script updated. Relaunching..."
+        copy /y "%tmpScript%" "%thisScript%" >nul
+        del "%tmpHashFile%" >nul 2>&1
+        del "%tmpScript%" >nul 2>&1
+        start "" "%thisScript%"
+        exit /b
+    ) else (
         call :PreLog "[ERROR] Failed to download latest script."
-        goto :cleanupUpdater
+    )
+)
+del "%tmpHashFile%" >nul 2>&1
+del "%tmpScript%" >nul 2>&1
+goto batUpdaterEnd
+
+:batUpdaterEnd
+
+:: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
+set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
+set "worldsTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds_tmp.txt"
+set "worldsHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/worlds.sha256"
+set "worldsUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/worlds.txt"
+set "tmpWorldsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.sha256"
+set "preWorldsLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaWorldsUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateWorlds%"=="true" (
+    call :PreLogWorlds "[INFO] Starting worlds.txt auto-update check..."
+
+    :: Ensure folder exists
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
+        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+        if %errorlevel% neq 0 (
+            call :PreLogWorlds "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            set "doWorldsUpdate=0"
+            goto worldsUpdaterEnd
+        )
+    )
+
+    :: Download expected hash
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpWorldsHashFile%" "%worldsHashUrl%" >> "%preWorldsLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLogWorlds "[ERROR] curl failed (code %errorlevel%) when downloading %worldsHashUrl%"
+        set "doWorldsUpdate=0"
+    ) else if exist "%tmpWorldsHashFile%" (
+        set "doWorldsUpdate=1"
+    ) else (
+        set "doWorldsUpdate=0"
+    )
+) else (
+    set "doWorldsUpdate=0"
+)
+
+if "%doWorldsUpdate%"=="1" goto runWorldsUpdater
+goto worldsUpdaterEnd
+
+:runWorldsUpdater
+:: Read and normalize expected hash
+set "expectedWorldsHash="
+for /f %%I in ('type "%tmpWorldsHashFile%"') do set "expectedWorldsHash=%%I"
+for /f %%U in ('echo %expectedWorldsHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedWorldsHash=%%U"
+
+:: Compute local hash
+if exist "%worldsFile%" (
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%worldsFile%').Hash.ToUpper()"`) do set "localWorldsHash=%%I"
+) else (
+    set "localWorldsHash=NONE"
+)
+
+call :PreLogWorlds "[INFO] Local worlds.txt hash:    %localWorldsHash%"
+call :PreLogWorlds "[INFO] Expected worlds.txt hash: %expectedWorldsHash%"
+
+:: Compare and update if needed
+if /I "%localWorldsHash%"=="%expectedWorldsHash%" (
+    call :PreLogWorlds "[INFO] worlds.txt is up-to-date."
+) else (
+    call :PreLogWorlds "[WARNING] worlds.txt is outdated. Updating..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%worldsTmpFile%" "%worldsUrl%" >> "%preWorldsLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLogWorlds "[ERROR] curl failed (code %errorlevel%) when downloading %worldsUrl%"
+    ) else if exist "%worldsTmpFile%" (
+        copy /y "%worldsTmpFile%" "%worldsFile%" >nul
+        del "%worldsTmpFile%" >nul 2>&1
+        call :PreLogWorlds "[SUCCESS] worlds.txt updated."
+    ) else (
+        call :PreLogWorlds "[ERROR] Failed to download latest worlds.txt"
     )
 )
 
-:cleanupUpdater
-del "%tmpHashFile%" >nul 2>&1
-del "%tmpScript%" >nul 2>&1
+goto worldsUpdaterEnd
+
+:worldsUpdaterEnd
 
 :: ==================== ADMIN PRIVILEGES CHECK =====================
 call :CheckAdmin || exit /b
@@ -103,10 +182,12 @@ call :UninstallRuneLite
 
 :: ==================== INSTALL NEW VERSIONS =====================
 call :InstallSimba
+call :ConfigureSimba
 call :InstallRuneLite
 
 :: ==================== RESTORE =====================
 call :AutoRestore
+call :CleanCredentialsWorlds
 
 :: ==================== SHORTCUTS & CLEANUP =====================
 call :CreateShortcuts
@@ -116,7 +197,6 @@ call :FinalCleanup
 call :Log "[INFO] All backups are stored in: %backupZipPath%"
 call :Log "[INFO] Script complete."
 
-:: Print finish time
 for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
 call :Log "[DONE] Run finished on %rundate%"
 echo. >> "%logFile%"
@@ -175,6 +255,7 @@ set "logFile=%backupRootPath%\SimbaUpdate_%datetime%.log"
 set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
+set "credentialsFile=%simbaPath%\credentials.simba"
 
 :: Print start time
 for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
@@ -233,6 +314,18 @@ echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
 
 echo [%curtime%] %msg% >> "%preLog%"
+exit /b
+
+:PreLogWorlds
+set "msg=%~1"
+set "curtime=%time: =0%"
+set "curtime=%curtime:~0,8%"
+powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
+echo [%curtime%] %msg% >> "%preWorldsLog%"
+exit /b
+
+powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
+echo [%curtime%] %msg% >> "%preWorldsLog%"
 exit /b
 
 :RotateLogs
@@ -387,9 +480,54 @@ curl -s -L -o "%simbaSetupPath%" "https://github.com/torwent/wasp-setup/releases
 if not exist "%simbaSetupPath%" (
     call :Log "[FAILED] Simba installer download failed."
 ) else (
-    start "" "%simbaSetupPath%" /S
+    start /wait "" "%simbaSetupPath%" --silent
+    if %errorlevel%==0 (
+        call :Log "[SUCCESS] Simba installation completed."
+    ) else (
+        call :Log "[FAILED] Simba installer exited with code %errorlevel%."
+    )
 )
 exit /b
+
+:ConfigureSimba
+call :Log "[INFO] Configuring Simba post-install..."
+
+:: Ensure Data folder exists
+if not exist "%simbaPath%\Data" mkdir "%simbaPath%\Data"
+
+:: Download settings.ini
+set "settingsIniURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.ini"
+set "settingsIniTmp=%forceUpdatePath%\settings.ini"
+set "settingsIniDest=%simbaPath%\Data\settings.ini"
+
+%SystemRoot%\System32\curl.exe -s -L -o "%settingsIniTmp%" "%settingsIniURL%" >> "%logFile%" 2>&1
+
+if not exist "%settingsIniTmp%" (
+    call :Log "[FAILED] Failed to download settings.ini"
+    exit /b
+)
+
+:: Move into Data folder and set read-only
+move /y "%settingsIniTmp%" "%settingsIniDest%" >> "%logFile%" 2>&1
+if exist "%settingsIniDest%" (
+    attrib +R "%settingsIniDest%"
+    call :Log "[SUCCESS] settings.ini downloaded and set to read-only"
+) else (
+    call :Log "[FAILED] Could not move settings.ini to Data folder"
+)
+
+:: Associate .simba with Simba64.exe
+ftype simba.script="%simba64ExePath%" "%%1" >> "%logFile%" 2>&1
+assoc .simba=simba.script >> "%logFile%" 2>&1
+
+if %errorlevel%==0 (
+    call :Log "[SUCCESS] .simba file extension associated with Simba64.exe"
+) else (
+    call :Log "[FAILED] Could not associate .simba file extension"
+)
+
+exit /b
+
 
 :InstallRuneLite
 call :Log "[INFO] Downloading RuneLite installer..."
@@ -401,27 +539,20 @@ curl -s -L -o "%runeLiteSetupPath%" "https://github.com/runelite/launcher/releas
 if not exist "%runeLiteSetupPath%" (
     call :Log "[FAILED] RuneLite installer download failed."
 ) else (
-    start "" "%runeLiteSetupPath%" /Silent
+    start /wait "" "%runeLiteSetupPath%" /Silent
+    if %errorlevel%==0 (
+        call :Log "[SUCCESS] RuneLite installation completed."
+    ) else (
+        call :Log "[FAILED] RuneLite installer exited with code %errorlevel%."
+    )
 )
-
-call :Log "[WARN] ======================================================"
-call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[WARN] MAKE SURE SIMBA AND RUNELITE INSTALLS ARE COMPLETE"
-call :Log "[WARN] ======================================================"
-call :Log "[WARN]             PRESS ANY KEY TO CONTINUE"
-call :Log "[WARN] ======================================================"
-pause >nul
-
-call :DownloadWaspProfile
-exit /b
 
 :DownloadWaspProfile
 call :Log "[INFO] Downloading wasp-profile.properties..."
 set "tempWaspFile=%forceUpdatePath%\wasp-profile.properties"
-curl -s -L -o "%tempWaspFile%" "%waspProfileURL%" >> "%logFile%" 2>&1
+set "cleanWaspFile=%forceUpdatePath%\wasp-profile-clean.properties"
+
+%SystemRoot%\System32\curl.exe -s -L -o "%tempWaspFile%" "%waspProfileURL%" >> "%logFile%" 2>&1
 
 if not exist "%tempWaspFile%" (
     call :Log "[FAILED] Failed to download wasp-profile.properties"
@@ -444,12 +575,15 @@ for /l %%i in (1,1,8) do (
 :: Compute ID
 for /f %%I in ('powershell -NoProfile -Command "[int[]]([char[]]'!name!') | Measure-Object -Sum | %%{$_.Sum}"') do set "id=%%I"
 
-:: Build final file path (no delayed expansion here)
+:: Build final file path
 set "finalWaspFile=%runeLiteProfiles2%\%name%-%id%.properties"
 
 if exist "%finalWaspFile%" del "%finalWaspFile%"
 
-:: Use copy + delete instead of move
+:: Keep a clean backup before moving into place
+copy /y "%tempWaspFile%" "%cleanWaspFile%" >nul
+
+:: Copy profile into place
 copy /y "%tempWaspFile%" "%finalWaspFile%" >> "%logFile%" 2>&1
 if exist "%finalWaspFile%" (
     del "%tempWaspFile%" >nul 2>&1
@@ -459,17 +593,21 @@ if exist "%finalWaspFile%" (
     exit /b
 )
 
-:: Disable plugins only if file exists
-if exist "%finalWaspFile%" (
-    powershell -NoProfile -Command ^
-      "(Get-Content '%finalWaspFile%') -replace '=true','=false' | Set-Content '%finalWaspFile%' -Encoding UTF8"
-    if %errorlevel% neq 0 (
-        call :Log "[FAILED] Could not disable plugins in %finalWaspFile%"
-    ) else (
-        call :Log "[INFO] Forced all plugin states to disabled in %finalWaspFile%"
-    )
+:: Launch RuneLite silently (output suppressed), wait 3s, then kill it
+start "" /min powershell -WindowStyle Hidden -Command ^
+  "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden -RedirectStandardOutput '$env:TEMP\rl_stdout.log' -RedirectStandardError '$env:TEMP\rl_stderr.log';" ^
+  "Start-Sleep -Seconds 3;" ^
+  "Stop-Process -Name 'RuneLite' -Force"
+
+call :Log "[INFO] RuneLite started silently. Will close in 3 seconds..."
+
+:: Restore clean profile afterward
+copy /y "%cleanWaspFile%" "%finalWaspFile%" >nul
+if %errorlevel%==0 (
+    call :Log "[SUCCESS] Restored clean wasp-profile.properties after RuneLite initialized"
+    del "%cleanWaspFile%" >nul 2>&1
 ) else (
-    call :Log "[FAILED] Skipped plugin disabling: file not found."
+    call :Log "[FAILED] Could not restore clean wasp-profile.properties"
 )
 
 call :UpdateProfilesJson "%name%" "%id%"
@@ -485,8 +623,11 @@ if exist "%profilesJson%" (
     copy "%profilesJson%" "%profilesBackup%" >nul
 )
 
+:: Ensure profiles.json exists and is valid
 if not exist "%profilesJson%" (
-    echo {"profiles":[{"id":-1,"name":"$rsprofile","sync":true,"active":false,"rev":-1,"defaultForRsProfiles":[]}]} > "%profilesJson%"
+    (
+        echo { "profiles": [] }
+    ) > "%profilesJson%"
 )
 
 powershell -NoProfile -Command ^
@@ -540,6 +681,51 @@ if exist "%backupSessionPath%" (
 ) else (
     call :Log "[WARN] No uncompressed backup folder found. Skipping restore."
 )
+exit /b
+
+:CleanCredentialsWorlds
+call :Log "[INFO] Checking credentials.simba for invalid worlds..."
+
+if not exist "%credentialsFile%" (
+    call :Log "[WARN] No credentials.simba found, skipping cleanup"
+    exit /b
+)
+
+if not exist "%worldsFile%" (
+    call :Log "[ERROR] worlds.txt not found at %worldsFile%"
+    exit /b
+)
+
+for /f "tokens=* usebackq" %%R in (`powershell -NoProfile -Command ^
+  "$worlds = Get-Content '%worldsFile%' | ForEach-Object { $_.Trim() } | Where-Object {$_ -match '^\d+$'};" ^
+  "$file = Get-Content '%credentialsFile%' -Raw;" ^
+  "$pattern = '\[([0-9,\s]+)\]';" ^
+  "$removed = @();" ^
+  "$updated = [System.Text.RegularExpressions.Regex]::Replace($file, $pattern, {" ^
+  "    $raw = $args[0].Groups[1].Value;" ^
+  "    $nums = $raw -split ',' | ForEach-Object { $_.Trim() };" ^
+  "    $valid = $nums | Where-Object { $worlds -contains $_ };" ^
+  "    $invalid = $nums | Where-Object { $worlds -notcontains $_ };" ^
+  "    if ($invalid.Count -gt 0) { $script:removed += $invalid }" ^
+  "    if ($valid.Count -gt 0) { '[' + ($valid -join ', ') + ']' } else { '[]' }" ^
+  "});" ^
+  "if ($file -ne $updated) {" ^
+  "    $updated | Set-Content '%credentialsFile%' -Encoding UTF8;" ^
+  "    if ($removed.Count -gt 0) { 'REMOVED=' + ($removed -join ', ') }" ^
+  "    else { 'NOCHANGE' }" ^
+  "} else { 'NOCHANGE' }"`) do set "cleanupResult=%%R"
+
+if defined cleanupResult (
+    if /I "!cleanupResult:~0,8!"=="REMOVED=" (
+        set "removedWorlds=!cleanupResult:~8!"
+        call :Log "[SUCCESS] Removed invalid worlds: !removedWorlds!"
+    ) else (
+        call :Log "[INFO] No invalid worlds found in credentials.simba"
+    )
+) else (
+    call :Log "[INFO] No invalid worlds found in credentials.simba"
+)
+
 exit /b
 
 :CreateShortcuts
