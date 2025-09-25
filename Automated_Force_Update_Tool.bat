@@ -15,7 +15,7 @@ if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceU
 
 :: ==================== AUTO-UPDATER (BATCH SCRIPT) =====================
 set "batFile=%~f0"
-set "batTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.bat"
+set "batTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool_tmp.bat"
 set "batHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.sha256"
 set "batUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/Automated_Force_Update_Tool.bat"
 set "tmpBatHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
@@ -51,10 +51,18 @@ goto BatUpdaterEnd
 
 :BatRunUpdater
 set "expectedBatHash="
-for /f "usebackq delims=" %%I in (`findstr /r /v "^$" "%tmpBatHashFile%"`) do set "expectedBatHash=%%I"
+for /f "usebackq delims=" %%I in (`findstr /r /v "^$" "%tmpBatHashFile%"`) do (
+    set "expectedBatHash=%%I"
+    goto GotBatHash
+)
+:GotBatHash
 for /f %%U in ('echo %expectedBatHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedBatHash=%%U"
 
-for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%batFile%').Hash.ToUpper()"`) do set "localBatHash=%%I"
+if exist "%batFile%" (
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%batFile%').Hash.ToUpper()"`) do set "localBatHash=%%I"
+) else (
+    set "localBatHash=NONE"
+)
 
 call :PreLog "%preBatLog%" [INFO] Local SHA256:    %localBatHash%
 call :PreLog "%preBatLog%" [INFO] Expected SHA256: %expectedBatHash%
@@ -83,7 +91,6 @@ del "%batTmpFile%" >nul 2>&1
 goto BatUpdaterEnd
 
 :BatUpdaterEnd
-
 
 :: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
