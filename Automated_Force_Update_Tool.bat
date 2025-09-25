@@ -440,7 +440,7 @@ if exist "%runeLiteProfilePath%" (
 exit /b
 
 :CompressBackup
-call :Log "[INFO] Compressing backup..."
+call :Log "[INFO] Compressing backup. Please wait..."
 if exist "%portable7zPath%" (
     "%portable7zPath%" a -t7z -mx1 "%backupZipPath%" "%backupSessionPath%\*" >> "%logFile%" 2>&1
     if exist "%backupZipPath%" (
@@ -777,4 +777,5 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
+
 
