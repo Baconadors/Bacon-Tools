@@ -7,6 +7,8 @@ setlocal EnableDelayedExpansion
 :: Toggle these for debugging individual updaters
 set "debugUpdateBat=true"
 set "debugUpdateWorlds=true"
+set "debugUpdateProfile=true"
+set "debugUpdateSettings=true"
 
 :: Ensure force update folder exists before updaters
 if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
@@ -83,22 +85,20 @@ set "tmpWorldsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.sha256"
 set "preWorldsLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaWorldsUpdate_PreLog_%RANDOM%.log"
 
 if /I "%debugUpdateWorlds%"=="true" (
-    call :PreLogWorlds "[INFO] Starting worlds.txt auto-update check..."
+    call :PreLog "[INFO] Starting worlds.txt auto-update check..."
 
-    :: Ensure folder exists
     if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
         mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
         if %errorlevel% neq 0 (
-            call :PreLogWorlds "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
             set "doWorldsUpdate=0"
-            goto worldsUpdaterEnd
+            goto WorldsUpdaterEnd
         )
     )
 
-    :: Download expected hash
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpWorldsHashFile%" "%worldsHashUrl%" >> "%preWorldsLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLogWorlds "[ERROR] curl failed (code %errorlevel%) when downloading %worldsHashUrl%"
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %worldsHashUrl%"
         set "doWorldsUpdate=0"
     ) else if exist "%tmpWorldsHashFile%" (
         set "doWorldsUpdate=1"
@@ -109,45 +109,182 @@ if /I "%debugUpdateWorlds%"=="true" (
     set "doWorldsUpdate=0"
 )
 
-if "%doWorldsUpdate%"=="1" goto runWorldsUpdater
-goto worldsUpdaterEnd
+if "%doWorldsUpdate%"=="1" goto WorldsRunUpdater
+goto WorldsUpdaterEnd
 
-:runWorldsUpdater
-:: Read and normalize expected hash
+:WorldsRunUpdater
 set "expectedWorldsHash="
 for /f %%I in ('type "%tmpWorldsHashFile%"') do set "expectedWorldsHash=%%I"
 for /f %%U in ('echo %expectedWorldsHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedWorldsHash=%%U"
 
-:: Compute local hash
 if exist "%worldsFile%" (
     for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%worldsFile%').Hash.ToUpper()"`) do set "localWorldsHash=%%I"
 ) else (
     set "localWorldsHash=NONE"
 )
 
-call :PreLogWorlds "[INFO] Local worlds.txt hash:    %localWorldsHash%"
-call :PreLogWorlds "[INFO] Expected worlds.txt hash: %expectedWorldsHash%"
+call :PreLog "[INFO] Local worlds.txt hash:    %localWorldsHash%"
+call :PreLog "[INFO] Expected worlds.txt hash: %expectedWorldsHash%"
 
-:: Compare and update if needed
 if /I "%localWorldsHash%"=="%expectedWorldsHash%" (
-    call :PreLogWorlds "[INFO] worlds.txt is up-to-date."
+    call :PreLog "[INFO] worlds.txt is up-to-date."
 ) else (
-    call :PreLogWorlds "[WARNING] worlds.txt is outdated. Updating..."
+    call :PreLog "[WARNING] worlds.txt is outdated. Updating..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%worldsTmpFile%" "%worldsUrl%" >> "%preWorldsLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLogWorlds "[ERROR] curl failed (code %errorlevel%) when downloading %worldsUrl%"
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %worldsUrl%"
     ) else if exist "%worldsTmpFile%" (
         copy /y "%worldsTmpFile%" "%worldsFile%" >nul
         del "%worldsTmpFile%" >nul 2>&1
-        call :PreLogWorlds "[SUCCESS] worlds.txt updated."
+        call :PreLog "[SUCCESS] worlds.txt updated."
     ) else (
-        call :PreLogWorlds "[ERROR] Failed to download latest worlds.txt"
+        call :PreLog "[ERROR] Failed to download latest worlds.txt"
     )
 )
 
-goto worldsUpdaterEnd
+goto WorldsUpdaterEnd
 
-:worldsUpdaterEnd
+:WorldsUpdaterEnd
+
+:: ==================== AUTO-UPDATER (WASP-PROFILE.PROPERTIES) =====================
+set "profileFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.properties"
+set "profileTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile_tmp.properties"
+set "profileHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.sha256"
+set "profileUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
+set "tmpProfileHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.sha256"
+set "preProfileLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaProfileUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateProfile%"=="true" (
+    call :PreLog "[INFO] Starting wasp-profile.properties auto-update check..."
+
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
+        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+        if %errorlevel% neq 0 (
+            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            set "doProfileUpdate=0"
+            goto ProfileUpdaterEnd
+        )
+    )
+
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpProfileHashFile%" "%profileHashUrl%" >> "%preProfileLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %profileHashUrl%"
+        set "doProfileUpdate=0"
+    ) else if exist "%tmpProfileHashFile%" (
+        set "doProfileUpdate=1"
+    ) else (
+        set "doProfileUpdate=0"
+    )
+) else (
+    set "doProfileUpdate=0"
+)
+
+if "%doProfileUpdate%"=="1" goto ProfileRunUpdater
+goto ProfileUpdaterEnd
+
+:ProfileRunUpdater
+set "expectedProfileHash="
+for /f %%I in ('type "%tmpProfileHashFile%"') do set "expectedProfileHash=%%I"
+for /f %%U in ('echo %expectedProfileHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedProfileHash=%%U"
+
+if exist "%profileFile%" (
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%profileFile%').Hash.ToUpper()"`) do set "localProfileHash=%%I"
+) else (
+    set "localProfileHash=NONE"
+)
+
+call :PreLog "[INFO] Local wasp-profile hash:    %localProfileHash%"
+call :PreLog "[INFO] Expected wasp-profile hash: %expectedProfileHash%"
+
+if /I "%localProfileHash%"=="%expectedProfileHash%" (
+    call :PreLog "[INFO] wasp-profile.properties is up-to-date."
+) else (
+    call :PreLog "[WARNING] wasp-profile.properties is outdated. Updating..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%profileTmpFile%" "%profileUrl%" >> "%preProfileLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %profileUrl%"
+    ) else if exist "%profileTmpFile%" (
+        copy /y "%profileTmpFile%" "%profileFile%" >nul
+        del "%profileTmpFile%" >nul 2>&1
+        call :PreLog "[SUCCESS] wasp-profile.properties updated."
+    ) else (
+        call :PreLog "[ERROR] Failed to download latest wasp-profile.properties"
+    )
+)
+
+goto ProfileUpdaterEnd
+
+:ProfileUpdaterEnd
+
+:: ==================== AUTO-UPDATER (SETTINGS.INI) =====================
+set "settingsFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.ini"
+set "settingsTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\settings_tmp.ini"
+set "settingsHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.sha256"
+set "settingsUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.ini"
+set "tmpSettingsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.sha256"
+set "preSettingsLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaSettingsUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateSettings%"=="true" (
+    call :PreLog "[INFO] Starting settings.ini auto-update check..."
+
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
+        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+        if %errorlevel% neq 0 (
+            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            set "doSettingsUpdate=0"
+            goto SettingsUpdaterEnd
+        )
+    )
+
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpSettingsHashFile%" "%settingsHashUrl%" >> "%preSettingsLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %settingsHashUrl%"
+        set "doSettingsUpdate=0"
+    ) else if exist "%tmpSettingsHashFile%" (
+        set "doSettingsUpdate=1"
+    ) else (
+        set "doSettingsUpdate=0"
+    )
+) else (
+    set "doSettingsUpdate=0"
+)
+
+if "%doSettingsUpdate%"=="1" goto SettingsRunUpdater
+goto SettingsUpdaterEnd
+
+:SettingsRunUpdater
+set "expectedSettingsHash="
+for /f %%I in ('type "%tmpSettingsHashFile%"') do set "expectedSettingsHash=%%I"
+for /f %%U in ('echo %expectedSettingsHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedSettingsHash=%%U"
+
+if exist "%settingsFile%" (
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%settingsFile%').Hash.ToUpper()"`) do set "localSettingsHash=%%I"
+) else (
+    set "localSettingsHash=NONE"
+)
+
+call :PreLog "[INFO] Local settings.ini hash:    %localSettingsHash%"
+call :PreLog "[INFO] Expected settings.ini hash: %expectedSettingsHash%"
+
+if /I "%localSettingsHash%"=="%expectedSettingsHash%" (
+    call :PreLog "[INFO] settings.ini is up-to-date."
+) else (
+    call :PreLog "[WARNING] settings.ini is outdated. Updating..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%settingsTmpFile%" "%settingsUrl%" >> "%preSettingsLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %settingsUrl%"
+    ) else if exist "%settingsTmpFile%" (
+        copy /y "%settingsTmpFile%" "%settingsFile%" >nul
+        del "%settingsTmpFile%" >nul 2>&1
+        call :PreLog "[SUCCESS] settings.ini updated."
+    ) else (
+        call :PreLog "[ERROR] Failed to download latest settings.ini"
+    )
+)
+
+goto SettingsUpdaterEnd
+
+:SettingsUpdaterEnd
 
 :: ==================== ADMIN PRIVILEGES CHECK =====================
 call :CheckAdmin || exit /b
@@ -298,10 +435,17 @@ echo [%curtime%] %msg% >> "%logFile%"
 exit /b
 
 :PreLog
-set "msg=%~1"
+:: %~1 = log file path
+:: %*  = all arguments
+setlocal
+set "logFile=%~1"
+:: shift off the first arg (log file), leaving the full message
+shift
+set "msg=%*"
 set "curtime=%time: =0%"
 set "curtime=%curtime:~0,8%"
 
+:: Pick color based on tags
 set "color=White"
 echo %msg% | find "[INFO]"    >nul && set "color=White"
 echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
@@ -311,21 +455,13 @@ echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
 echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
 echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 
+:: Print to console
 powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor %color%"
 
-echo [%curtime%] %msg% >> "%preLog%"
-exit /b
+:: Append to chosen log file
+if defined logFile echo [%curtime%] %msg% >> "%logFile%"
 
-:PreLogWorlds
-set "msg=%~1"
-set "curtime=%time: =0%"
-set "curtime=%curtime:~0,8%"
-powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
-echo [%curtime%] %msg% >> "%preWorldsLog%"
-exit /b
-
-powershell -NoProfile -Command "Write-Host '[%curtime%] %msg%' -ForegroundColor White"
-echo [%curtime%] %msg% >> "%preWorldsLog%"
+endlocal
 exit /b
 
 :RotateLogs
@@ -440,7 +576,7 @@ if exist "%runeLiteProfilePath%" (
 exit /b
 
 :CompressBackup
-call :Log "[INFO] Compressing backup. Please wait..."
+call :Log "[INFO] Compressing backup..."
 if exist "%portable7zPath%" (
     "%portable7zPath%" a -t7z -mx1 "%backupZipPath%" "%backupSessionPath%\*" >> "%logFile%" 2>&1
     if exist "%backupZipPath%" (
@@ -507,13 +643,13 @@ if not exist "%settingsIniTmp%" (
     exit /b
 )
 
-:: Move into Data folder and set read-only
-move /y "%settingsIniTmp%" "%settingsIniDest%" >> "%logFile%" 2>&1
+:: Copy into Data folder and set read-only
+copy /y "%settingsIniTmp%" "%settingsIniDest%" >> "%logFile%" 2>&1
 if exist "%settingsIniDest%" (
     attrib +R "%settingsIniDest%"
-    call :Log "[SUCCESS] settings.ini downloaded and set to read-only"
+    call :Log "[SUCCESS] settings.ini downloaded and copied to Data folder"
 ) else (
-    call :Log "[FAILED] Could not move settings.ini to Data folder"
+    call :Log "[FAILED] Could not copy settings.ini to Data folder"
 )
 
 :: Associate .simba with Simba64.exe
@@ -527,7 +663,6 @@ if %errorlevel%==0 (
 )
 
 exit /b
-
 
 :InstallRuneLite
 call :Log "[INFO] Downloading RuneLite installer..."
@@ -550,7 +685,6 @@ if not exist "%runeLiteSetupPath%" (
 :DownloadWaspProfile
 call :Log "[INFO] Downloading wasp-profile.properties..."
 set "tempWaspFile=%forceUpdatePath%\wasp-profile.properties"
-set "cleanWaspFile=%forceUpdatePath%\wasp-profile-clean.properties"
 
 %SystemRoot%\System32\curl.exe -s -L -o "%tempWaspFile%" "%waspProfileURL%" >> "%logFile%" 2>&1
 
@@ -575,21 +709,15 @@ for /l %%i in (1,1,8) do (
 :: Compute ID
 for /f %%I in ('powershell -NoProfile -Command "[int[]]([char[]]'!name!') | Measure-Object -Sum | %%{$_.Sum}"') do set "id=%%I"
 
-:: Build final file path
+:: Build final file path in RuneLite profiles2
 set "finalWaspFile=%runeLiteProfiles2%\%name%-%id%.properties"
-
-if exist "%finalWaspFile%" del "%finalWaspFile%"
-
-:: Keep a clean backup before moving into place
-copy /y "%tempWaspFile%" "%cleanWaspFile%" >nul
 
 :: Copy profile into place
 copy /y "%tempWaspFile%" "%finalWaspFile%" >> "%logFile%" 2>&1
 if exist "%finalWaspFile%" (
-    del "%tempWaspFile%" >nul 2>&1
-    call :Log "[SUCCESS] wasp-profile.properties saved as %name%-%id%.properties"
+    call :Log "[SUCCESS] wasp-profile.properties copied as %name%-%id%.properties"
 ) else (
-    call :Log "[FAILED] Could not save wasp-profile.properties to %finalWaspFile%"
+    call :Log "[FAILED] Could not copy wasp-profile.properties to %finalWaspFile%"
     exit /b
 )
 
@@ -601,15 +729,7 @@ start "" /min powershell -WindowStyle Hidden -Command ^
 
 call :Log "[INFO] RuneLite started silently. Will close in 3 seconds..."
 
-:: Restore clean profile afterward
-copy /y "%cleanWaspFile%" "%finalWaspFile%" >nul
-if %errorlevel%==0 (
-    call :Log "[SUCCESS] Restored clean wasp-profile.properties after RuneLite initialized"
-    del "%cleanWaspFile%" >nul 2>&1
-) else (
-    call :Log "[FAILED] Could not restore clean wasp-profile.properties"
-)
-
+:: Update profiles.json with the new random profile
 call :UpdateProfilesJson "%name%" "%id%"
 exit /b
 
@@ -771,11 +891,15 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%backupRootPath%\SimbaUpdate_*.log"
     call :Log "[INFO] Deleted old log %%F"
 )
 
+:: Delete any stray PreLog files in forceUpdatePath
+del /q "%forceUpdatePath%\*PreLog*.log" >nul 2>&1
+if %errorlevel%==0 (
+    call :Log "[INFO] Deleted stray PreLog files from force update folder"
+)
+
 :: Keep only last 5 profiles.json backups
 for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
     del "%runeLiteProfiles2%\%%F"
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
-
-
