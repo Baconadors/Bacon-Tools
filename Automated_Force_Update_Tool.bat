@@ -32,16 +32,16 @@ if /I "%debugUpdateBat%"=="true" (
         )
     )
 
-    call :PreLog "[INFO] Starting script auto-update check..."
-
-    :: Download expected hash with explicit curl
+    :: Download expected hash first
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
         call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%"
         set "doBatUpdate=0"
-    ) else (
-        set "doBatUpdate=1"
+        goto batUpdaterEnd
     )
+
+    call :PreLog "[INFO] Starting script auto-update check..."
+    set "doBatUpdate=1"
 ) else (
     set "doBatUpdate=0"
 )
