@@ -23,12 +23,12 @@ if /I "%debugUpdateBat%"=="true" (
     set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
     set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
 
-    call :PreLog %preLog% [INFO] Starting script auto-update check...
+    call :PreLog "%preLog%" [INFO] Starting script auto-update check...
 
     :: Download expected hash with explicit curl
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog %preLog% [ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%
+        call :PreLog "%preLog%" [ERROR] curl failed (code %errorlevel%) when downloading %latestHashUrl%
         set "doBatUpdate=0"
     ) else (
         set "doBatUpdate=1"
@@ -49,25 +49,25 @@ for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.To
 :: Compute local hash
 for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
 
-call :PreLog %preLog% [INFO] Local SHA256:    %localHash%
-call :PreLog %preLog% [INFO] Expected SHA256: %expectedHash%
+call :PreLog "%preLog%" [INFO] Local SHA256:    %localHash%
+call :PreLog "%preLog%" [INFO] Expected SHA256: %expectedHash%
 
 if /I "%localHash%"=="%expectedHash%" (
-    call :PreLog %preLog% [INFO] Script is up-to-date.
+    call :PreLog "%preLog%" [INFO] Script is up-to-date.
 ) else (
-    call :PreLog %preLog% [WARNING] Script is outdated. Updating...
+    call :PreLog "%preLog%" [WARNING] Script is outdated. Updating...
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
-        call :PreLog %preLog% [ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%
+        call :PreLog "%preLog%" [ERROR] curl failed (code %errorlevel%) when downloading %latestScriptUrl%
     ) else if exist "%tmpScript%" (
-        call :PreLog %preLog% [INFO] Script updated. Relaunching...
+        call :PreLog "%preLog%" [INFO] Script updated. Relaunching...
         copy /y "%tmpScript%" "%thisScript%" >nul
         del "%tmpHashFile%" >nul 2>&1
         del "%tmpScript%" >nul 2>&1
         start "" "%thisScript%"
         exit /b
     ) else (
-        call :PreLog %preLog% [ERROR] Failed to download latest script.
+        call :PreLog "%preLog%" [ERROR] Failed to download latest script.
     )
 )
 del "%tmpHashFile%" >nul 2>&1
@@ -75,7 +75,6 @@ del "%tmpScript%" >nul 2>&1
 goto batUpdaterEnd
 
 :batUpdaterEnd
-
 
 :: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
