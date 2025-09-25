@@ -5,7 +5,7 @@ setlocal EnableDelayedExpansion
 
 :: ==================== DEBUG TOGGLES =====================
 :: Toggle these for debugging individual updaters
-set "debugUpdateBat=false"
+set "debugUpdateBat=true"
 set "debugUpdateWorlds=true"
 
 :: Ensure force update folder exists before updaters
@@ -777,3 +777,4 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
+
