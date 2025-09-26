@@ -331,7 +331,7 @@ call :CreateShortcuts
 call :FinalCleanup
 
 :: ==================== FINISH =====================
-call :Log "[INFO] All backups are stored in: %backupZipPath%"
+call :Log "[INFO] Backup location: %backupZipPath%"
 call :Log "[INFO] Script complete."
 
 for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
@@ -576,7 +576,7 @@ if exist "%runeLiteProfilePath%" (
 exit /b
 
 :CompressBackup
-call :Log "[INFO] Compressing backup..."
+call :Log "[INFO] Compressing backup. Please wait..."
 if exist "%portable7zPath%" (
     "%portable7zPath%" a -t7z -mx1 "%backupZipPath%" "%backupSessionPath%\*" >> "%logFile%" 2>&1
     if exist "%backupZipPath%" (
@@ -903,3 +903,4 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
+
