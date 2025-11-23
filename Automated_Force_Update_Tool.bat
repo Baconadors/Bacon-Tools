@@ -3,9 +3,17 @@
 @echo off
 setlocal EnableDelayedExpansion
 
-:: ==================== ADMIN PRIVILEGES CHECK  =====================
-:: The script will immediately check for admin rights and exit if not found.
-call :CheckAdmin || exit /b
+:: ==================== IMMEDIATE ADMIN CHECK AND SELF-ELEVATION =====================
+call :CheckAdmin
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Required administrative elevation failed or was denied.
+    echo [EXIT] Script cannot proceed without full rights.
+	echo [EXIT] Attempting to re-run as self-elevated.
+    pause
+    exit /b 1
+)
+:: If we reach this point, the script is running elevated.
 
 :: ==================== DEBUG TOGGLES =====================
 :: Toggle these for debugging individual updaters
@@ -164,7 +172,7 @@ if /I "%debugUpdateProfile%"=="true" (
     if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
         mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
         if %errorlevel% neq 0 (
-            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            call :PreLog "[ERROR] Could not create %LOCALAPDATA%\SimbaForceUpdate"
             set "doProfileUpdate=0"
             goto ProfileUpdaterEnd
         )
@@ -349,14 +357,17 @@ exit
 :: ####################################################################
 
 :CheckAdmin
+:: Checks for admin rights using 'net session'
 net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] This script requires administrative privileges. 
-    echo          Right click file -> Run as administrator.
-    pause
-    exit /b 1
+if %errorlevel% equ 0 (
+    :: Already running as admin
+    exit /b 0
 )
-exit /b 0
+
+:: If not admin, attempt to self-elevate using PowerShell
+echo Requesting administrative privileges...
+powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+exit /b 1
 
 :DefinePaths
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format ddMMyyyy_HHmmss" 2^>nul') do set "datetime=%%I"
