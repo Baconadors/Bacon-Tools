@@ -3,6 +3,10 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: ==================== ADMIN PRIVILEGES CHECK  =====================
+:: The script will immediately check for admin rights and exit if not found.
+call :CheckAdmin || exit /b
+
 :: ==================== DEBUG TOGGLES =====================
 :: Toggle these for debugging individual updaters
 set "debugUpdateBat=true"
@@ -200,7 +204,7 @@ if /I "%localProfileHash%"=="%expectedProfileHash%" (
     call :PreLog "[INFO] wasp-profile.properties is up-to-date."
 ) else (
     call :PreLog "[WARNING] wasp-profile.properties is outdated. Updating..."
-    %SystemRoot%\System32\curl.exe -s -L --fail -o "%profileTmpFile%" "%profileUrl%" >> "%preProfileLog%" 2>&1
+    %SystemRoot%\System32\curl.exe -s -L -o "%profileTmpFile%" "%profileUrl%" >> "%preProfileLog%" 2>&1
     if %errorlevel% neq 0 (
         call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %profileUrl%"
     ) else if exist "%profileTmpFile%" (
@@ -286,9 +290,6 @@ goto SettingsUpdaterEnd
 
 :SettingsUpdaterEnd
 
-:: ==================== ADMIN PRIVILEGES CHECK =====================
-call :CheckAdmin || exit /b
-
 :: ==================== DEFINE PATHS =====================
 call :DefinePaths
 
@@ -351,7 +352,7 @@ exit
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] This script requires administrative privileges. 
-    echo         Right click file -> Run as administrator.
+    echo          Right click file -> Run as administrator.
     pause
     exit /b 1
 )
@@ -436,7 +437,7 @@ exit /b
 
 :PreLog
 :: %~1 = log file path
-:: %*  = all arguments
+:: %* = all arguments
 setlocal
 set "logFile=%~1"
 :: shift off the first arg (log file), leaving the full message
@@ -822,17 +823,17 @@ for /f "tokens=* usebackq" %%R in (`powershell -NoProfile -Command ^
   "$pattern = '\[([0-9,\s]+)\]';" ^
   "$removed = @();" ^
   "$updated = [System.Text.RegularExpressions.Regex]::Replace($file, $pattern, {" ^
-  "    $raw = $args[0].Groups[1].Value;" ^
-  "    $nums = $raw -split ',' | ForEach-Object { $_.Trim() };" ^
-  "    $valid = $nums | Where-Object { $worlds -contains $_ };" ^
-  "    $invalid = $nums | Where-Object { $worlds -notcontains $_ };" ^
-  "    if ($invalid.Count -gt 0) { $script:removed += $invalid }" ^
-  "    if ($valid.Count -gt 0) { '[' + ($valid -join ', ') + ']' } else { '[]' }" ^
+  "  $raw = $args[0].Groups[1].Value;" ^
+  "  $nums = $raw -split ',' | ForEach-Object { $_.Trim() };" ^
+  "  $valid = $nums | Where-Object { $worlds -contains $_ };" ^
+  "  $invalid = $nums | Where-Object { $worlds -notcontains $_ };" ^
+  "  if ($invalid.Count -gt 0) { $script:removed += $invalid }" ^
+  "  if ($valid.Count -gt 0) { '[' + ($valid -join ', ') + ']' } else { '[]' }" ^
   "});" ^
   "if ($file -ne $updated) {" ^
-  "    $updated | Set-Content '%credentialsFile%' -Encoding UTF8;" ^
-  "    if ($removed.Count -gt 0) { 'REMOVED=' + ($removed -join ', ') }" ^
-  "    else { 'NOCHANGE' }" ^
+  "  $updated | Set-Content '%credentialsFile%' -Encoding UTF8;" ^
+  "  if ($removed.Count -gt 0) { 'REMOVED=' + ($removed -join ', ') }" ^
+  "  else { 'NOCHANGE' }" ^
   "} else { 'NOCHANGE' }"`) do set "cleanupResult=%%R"
 
 if defined cleanupResult (
@@ -903,4 +904,3 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
 exit /b
-
