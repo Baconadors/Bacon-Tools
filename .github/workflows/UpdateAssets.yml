@@ -1,9 +1,9 @@
 name: Update Worlds and Release Assets
 
 on:
-  workflow_dispatch:       # manual run
+  workflow_dispatch:
   schedule:
-    - cron: "0 7 * * *"    # 1 AM Central (07:00 UTC)
+    - cron: "0 * * * *"
   push:
     branches:
       - main
@@ -14,6 +14,7 @@ on:
       - 'wasp-profile.properties'
       - 'worlds.txt'
       - 'settings.ini'
+      - 'BAT_Auth.txt'
 
 permissions:
   contents: write
@@ -109,7 +110,6 @@ jobs:
       - name: Get Changed Files
         id: changed
         run: |
-          # Ensure full commit history
           git fetch --prune --unshallow || true
 
           if git rev-parse HEAD^ >/dev/null 2>&1; then
@@ -123,8 +123,7 @@ jobs:
           echo "=== Raw changed files detected ==="
           cat changed_raw.txt || true
 
-          # Filter only the whitelisted files
-          grep -E '^(Automated_Force_Update_Tool\.bat|Setup_File_Downloader\.bat|Windows_Defender_Exclusion_Tool\.bat|wasp-profile\.properties|worlds\.txt|settings\.ini)$' \
+          grep -E '^(Automated_Force_Update_Tool\.bat|Setup_File_Downloader\.bat|Windows_Defender_Exclusion_Tool\.bat|wasp-profile\.properties|worlds\.txt|settings\.ini|BAT_Auth\.txt)$' \
             changed_raw.txt > changed.txt || true
 
           echo "=== Filtered changed files ==="
@@ -182,7 +181,6 @@ jobs:
             baseNameNoExt="${baseName%%.*}"
             shaFile="$baseNameNoExt.sha256"
 
-            # Skip SHA generation if already done for this file base
             if printf '%s\n' "${uploaded_hashes[@]}" | grep -q -x "$baseNameNoExt"; then
               echo "✅ SHA256 already generated for $baseNameNoExt, skipping duplicate"
             else
