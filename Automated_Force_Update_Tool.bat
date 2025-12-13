@@ -9,18 +9,28 @@ if %errorlevel% neq 0 (
     echo.
     echo [ERROR] Required administrative elevation failed or was denied.
     echo [EXIT] Script cannot proceed without full rights.
-	echo [EXIT] Attempting to re-run as self-elevated.
+    echo [EXIT] Attempting to re-run as self-elevated.
     pause
     exit /b 1
 )
 :: If we reach this point, the script is running elevated.
 
 :: ==================== DEBUG TOGGLES =====================
-:: Toggle these for debugging individual updaters
+:: Toggle these for updaters/files (set to "false" to skip file update check)
 set "debugUpdateBat=true"
 set "debugUpdateWorlds=true"
 set "debugUpdateProfile=true"
 set "debugUpdateSettings=true"
+set "debugUpdateAuth=true"
+
+:: Toggle these for main script actions (set to "false" to skip action)
+set "debugRunInstallSimba=true"
+set "debugRunInstallRuneLite=true"
+set "debugRunBackup=true"
+set "debugRunRestore=true"
+set "debugRunRemoveSimba=true"
+set "debugRunUninstallRuneLite=true"
+set "debugRunCleanup=true"
 
 :: Ensure force update folder exists before updaters
 if not exist "%LOCALAPPDATA%\SimbaForceUpdate" mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
@@ -61,7 +71,7 @@ for /f %%U in ('echo %expectedHash% ^| powershell -NoProfile -Command "$input.To
 :: Compute local hash
 for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%thisScript%').Hash.ToUpper()"`) do set "localHash=%%I"
 
-call :PreLog "[INFO] Local SHA256:    %localHash%"
+call :PreLog "[INFO] Local SHA256: %localHash%"
 call :PreLog "[INFO] Expected SHA256: %expectedHash%"
 
 if /I "%localHash%"=="%expectedHash%" (
@@ -87,6 +97,78 @@ del "%tmpScript%" >nul 2>&1
 goto batUpdaterEnd
 
 :batUpdaterEnd
+
+:: ==================== AUTO-UPDATER (BAT_AUTH.TXT) =====================
+set "authFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.txt"
+set "authTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth_tmp.txt"
+set "authHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/BAT_Auth.sha256"
+set "authUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/BAT_Auth.txt"
+set "tmpAuthHashFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.sha256"
+set "preAuthLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaAuthUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateAuth%"=="true" (
+    call :PreLog "[INFO] Starting BAT_Auth.txt auto-update check..."
+
+    if not exist "%LOCALAPPDATA%\SimbaForceUpdate" (
+        mkdir "%LOCALAPPDATA%\SimbaForceUpdate"
+        if %errorlevel% neq 0 (
+            call :PreLog "[ERROR] Could not create %LOCALAPPDATA%\SimbaForceUpdate"
+            set "doAuthUpdate=0"
+            goto AuthUpdaterEnd
+        )
+    )
+
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpAuthHashFile%" "%authHashUrl%" >> "%preAuthLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %authHashUrl%"
+        set "doAuthUpdate=0"
+    ) else if exist "%tmpAuthHashFile%" (
+        set "doAuthUpdate=1"
+    ) else (
+        set "doAuthUpdate=0"
+    )
+) else (
+    set "doAuthUpdate=0"
+)
+
+if "%doAuthUpdate%"=="1" goto AuthRunUpdater
+goto AuthUpdaterEnd
+
+:AuthRunUpdater
+set "expectedAuthHash="
+for /f %%I in ('type "%tmpAuthHashFile%"') do set "expectedAuthHash=%%I"
+for /f %%U in ('echo %expectedAuthHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedAuthHash=%%U"
+
+if exist "%authFile%" (
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%authFile%').Hash.ToUpper()"`) do set "localAuthHash=%%I"
+) else (
+    set "localAuthHash=NONE"
+)
+
+call :PreLog "[INFO] Local BAT_Auth.txt hash: %localAuthHash%"
+call :PreLog "[INFO] Expected BAT_Auth.txt hash: %expectedAuthHash%"
+
+if /I "%localAuthHash%"=="%expectedAuthHash%" (
+    call :PreLog "[INFO] BAT_Auth.txt is up-to-date."
+) else (
+    call :PreLog "[WARNING] BAT_Auth.txt is outdated. Updating..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%authTmpFile%" "%authUrl%" >> "%preAuthLog%" 2>&1
+    if %errorlevel% neq 0 (
+        call :PreLog "[ERROR] curl failed (code %errorlevel%) when downloading %authUrl%"
+    ) else if exist "%authTmpFile%" (
+        copy /y "%authTmpFile%" "%authFile%" >nul
+        del "%authTmpFile%" >nul 2>&1
+        call :PreLog "[SUCCESS] BAT_Auth.txt updated."
+    ) else (
+        call :PreLog "[ERROR] Failed to download latest BAT_Auth.txt"
+    )
+)
+
+del "%tmpAuthHashFile%" >nul 2>&1
+del "%authTmpFile%" >nul 2>&1
+goto AuthUpdaterEnd
+
+:AuthUpdaterEnd
 
 :: ==================== AUTO-UPDATER (WORLDS.TXT) =====================
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
@@ -135,7 +217,7 @@ if exist "%worldsFile%" (
     set "localWorldsHash=NONE"
 )
 
-call :PreLog "[INFO] Local worlds.txt hash:    %localWorldsHash%"
+call :PreLog "[INFO] Local worlds.txt hash: %localWorldsHash%"
 call :PreLog "[INFO] Expected worlds.txt hash: %expectedWorldsHash%"
 
 if /I "%localWorldsHash%"=="%expectedWorldsHash%" (
@@ -205,7 +287,7 @@ if exist "%profileFile%" (
     set "localProfileHash=NONE"
 )
 
-call :PreLog "[INFO] Local wasp-profile hash:    %localProfileHash%"
+call :PreLog "[INFO] Local wasp-profile hash: %localProfileHash%"
 call :PreLog "[INFO] Expected wasp-profile hash: %expectedProfileHash%"
 
 if /I "%localProfileHash%"=="%expectedProfileHash%" (
@@ -275,7 +357,7 @@ if exist "%settingsFile%" (
     set "localSettingsHash=NONE"
 )
 
-call :PreLog "[INFO] Local settings.ini hash:    %localSettingsHash%"
+call :PreLog "[INFO] Local settings.ini hash: %localSettingsHash%"
 call :PreLog "[INFO] Expected settings.ini hash: %expectedSettingsHash%"
 
 if /I "%localSettingsHash%"=="%expectedSettingsHash%" (
@@ -319,25 +401,57 @@ call :KillProcesses
 call :AddDefenderExclusions
 
 :: ==================== BACKUP =====================
-call :BackupData
-call :CompressBackup
+if /I "%debugRunBackup%"=="true" (
+    call :BackupData
+    call :CompressBackup
+) else (
+    call :Log "[INFO] Skipping Backup and Compression (debugRunBackup=false)."
+)
 
 :: ==================== REMOVE OLD INSTALLS =====================
-call :RemoveOldSimba
-call :UninstallRuneLite
+if /I "%debugRunRemoveSimba%"=="true" (
+    call :RemoveOldSimba
+) else (
+    call :Log "[INFO] Skipping RemoveOldSimba (debugRunRemoveSimba=false)."
+)
+
+if /I "%debugRunUninstallRuneLite%"=="true" (
+    call :UninstallRuneLite
+) else (
+    call :Log "[INFO] Skipping UninstallRuneLite (debugRunUninstallRuneLite=false)."
+)
 
 :: ==================== INSTALL NEW VERSIONS =====================
-call :InstallSimba
-call :ConfigureSimba
-call :InstallRuneLite
+if /I "%debugRunInstallSimba%"=="true" (
+    call :InstallSimba
+    call :ConfigureSimba
+) else (
+    call :Log "[INFO] Skipping InstallSimba and ConfigureSimba (debugRunInstallSimba=false)."
+)
+
+if /I "%debugRunInstallRuneLite%"=="true" (
+    call :InstallRuneLite
+) else (
+    call :Log "[INFO] Skipping InstallRuneLite and profile setup (debugRunInstallRuneLite=false)."
+)
 
 :: ==================== RESTORE =====================
-call :AutoRestore
-call :CleanCredentialsWorlds
+if /I "%debugRunRestore%"=="true" (
+    call :AutoRestore
+    call :CleanCredentialsWorlds
+) else (
+    call :Log "[INFO] Skipping AutoRestore and CleanCredentialsWorlds (debugRunRestore=false)."
+)
+
 
 :: ==================== SHORTCUTS & CLEANUP =====================
 call :CreateShortcuts
-call :FinalCleanup
+
+if /I "%debugRunCleanup%"=="true" (
+    call :FinalCleanup
+) else (
+    call :Log "[INFO] Skipping FinalCleanup (debugRunCleanup=false)."
+)
 
 :: ==================== FINISH =====================
 call :Log "[INFO] Backup location: %backupZipPath%"
@@ -346,6 +460,9 @@ call :Log "[INFO] Script complete."
 for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
 call :Log "[DONE] Run finished on %rundate%"
 echo. >> "%logFile%"
+
+:: Display the BAT file completion code
+call :DisplayCompletionCode
 
 endlocal
 echo Press any key to finish and exit...
@@ -415,7 +532,7 @@ exit /b
 :InitLogging
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
 echo ===================================================== >> "%logFile%"
-echo  Simba + RuneLite Update Log - %datetime% >> "%logFile%"
+echo Simba + RuneLite Update Log - %datetime% >> "%logFile%"
 echo ===================================================== >> "%logFile%"
 
 :: Merge updater pre-log into main log (if it exists)
@@ -425,6 +542,14 @@ if exist "%preLog%" (
     echo === AUTO-UPDATER LOG END === >> "%logFile%"
     del "%preLog%" >nul 2>&1
 )
+
+if exist "%preAuthLog%" (
+    echo === AUTH-UPDATER LOG START === >> "%logFile%"
+    type "%preAuthLog%" >> "%logFile%"
+    echo === AUTH-UPDATER LOG END === >> "%logFile%"
+    del "%preAuthLog%" >nul 2>&1
+)
+
 exit /b
 
 :Log
@@ -437,7 +562,7 @@ echo %msg% | find "[INFO]"    >nul && set "color=White"
 echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
 echo %msg% | find "[FAILED]"  >nul && set "color=Red"
 echo %msg% | find "[ERROR]"   >nul && set "color=Red"
-echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
+echo %msg% | find "[WARN]"    >nul && set "color=Yellow"
 echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
 echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 
@@ -463,7 +588,7 @@ echo %msg% | find "[INFO]"    >nul && set "color=White"
 echo %msg% | find "[SUCCESS]" >nul && set "color=Green"
 echo %msg% | find "[FAILED]"  >nul && set "color=Red"
 echo %msg% | find "[ERROR]"   >nul && set "color=Red"
-echo %msg% | find "[WARN]"    >nul && set "color=Cyan"
+echo %msg% | find "[WARN]"    >nul && set "color=Yellow"
 echo %msg% | find "[STRT]"    >nul && set "color=Cyan"
 echo %msg% | find "[DONE]"    >nul && set "color=Cyan"
 
@@ -914,4 +1039,34 @@ for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.b
     del "%runeLiteProfiles2%\%%F"
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
+exit /b
+
+:DisplayCompletionCode
+setlocal EnableDelayedExpansion
+echo.
+powershell -NoProfile -Command "Write-Host '=====================================================' -ForegroundColor White"
+powershell -NoProfile -Command "Write-Host '                   SCRIPT COMPLETE                   ' -ForegroundColor White"
+powershell -NoProfile -Command "Write-Host '=====================================================' -ForegroundColor White"
+
+set "authFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.txt"
+
+if not exist "%authFile%" (
+    powershell -NoProfile -Command "Write-Host 'BAT file completion code: [ERROR] BAT_Auth.txt not found.' -ForegroundColor Red"
+    goto EndDisplay
+)
+
+:: This single PowerShell command handles reading the file, selecting the code, and displaying the mixed-color result.
+powershell -NoProfile -Command ^
+  "$codes = Get-Content '%authFile%' | Select-String -Pattern '([A-Za-z0-9]{6})' -AllMatches | ForEach-Object { $_.Matches.Groups[1].Value };" ^
+  "if ($codes.Count -gt 0) {" ^
+  "  $randIndex = Get-Random -Maximum $codes.Count;" ^
+  "  Write-Host 'BAT file completion code: ' -NoNewline -ForegroundColor White;" ^
+  "  Write-Host $codes[$randIndex] -ForegroundColor Cyan" ^
+  "} else {" ^
+  "  Write-Host 'BAT file completion code: [ERROR] No 6-digit codes found in file.' -ForegroundColor Red" ^
+  "}"
+
+:EndDisplay
+echo.
+endlocal
 exit /b
