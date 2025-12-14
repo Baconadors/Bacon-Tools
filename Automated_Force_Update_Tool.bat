@@ -400,6 +400,14 @@ call :CleanRegistry
 call :KillProcesses
 call :AddDefenderExclusions
 
+call :Log "[INFO] Flushing DNS resolver cache..."
+ipconfig /flushdns >> "%logFile%" 2>&1
+if %errorlevel% neq 0 (
+    call :Log "[FAILED] Could not flush DNS cache."
+) else (
+    call :Log "[SUCCESS] DNS resolver cache flushed."
+)
+
 :: ==================== BACKUP =====================
 if /I "%debugRunBackup%"=="true" (
     call :BackupData
@@ -860,9 +868,9 @@ if exist "%finalWaspFile%" (
 
 :: Launch RuneLite silently (output suppressed), wait 3s, then kill it
 start "" /min powershell -WindowStyle Hidden -Command ^
-  "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden -RedirectStandardOutput '$env:TEMP\rl_stdout.log' -RedirectStandardError '$env:TEMP\rl_stderr.log';" ^
-  "Start-Sleep -Seconds 3;" ^
-  "Stop-Process -Name 'RuneLite' -Force"
+    "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden -RedirectStandardOutput '$env:TEMP\rl_stdout.log' -RedirectStandardError '$env:TEMP\rl_stderr.log';" ^
+    "Start-Sleep -Seconds 3;" ^
+    "Stop-Process -Name 'RuneLite' -Force"
 
 call :Log "[INFO] RuneLite started silently. Will close in 3 seconds..."
 
@@ -888,19 +896,19 @@ if not exist "%profilesJson%" (
 )
 
 powershell -NoProfile -Command ^
-  "$file='%profilesJson%';" ^
-  "$json=Get-Content $file -Raw | ConvertFrom-Json;" ^
-  "if ($null -eq $json.profiles) { $json=@{profiles=@()} };" ^
-  "$clean=@();" ^
-  "foreach ($p in $json.profiles) {" ^
-  "  if ($p.id -eq %newProfileId% -or $p.name -eq '%newProfileName%') { continue }" ^
-  "  $p.active=$false;" ^
-  "  $clean+=$p" ^
-  "};" ^
-  "$new=[PSCustomObject]@{ id=%newProfileId%; name='%newProfileName%'; sync=$false; active=$true; rev=-1; defaultForRsProfiles=@() };" ^
-  "$clean+=$new;" ^
-  "$json.profiles=$clean;" ^
-  "$json | ConvertTo-Json -Depth 3 | Set-Content $file -Encoding UTF8"
+    "$file='%profilesJson%';" ^
+    "$json=Get-Content $file -Raw | ConvertFrom-Json;" ^
+    "if ($null -eq $json.profiles) { $json=@{profiles=@()} };" ^
+    "$clean=@();" ^
+    "foreach ($p in $json.profiles) {" ^
+    "    if ($p.id -eq %newProfileId% -or $p.name -eq '%newProfileName%') { continue }" ^
+    "    $p.active=$false;" ^
+    "    $clean+=$p" ^
+    "};" ^
+    "$new=[PSCustomObject]@{ id=%newProfileId%; name='%newProfileName%'; sync=$false; active=$true; rev=-1; defaultForRsProfiles=@() };" ^
+    "$clean+=$new;" ^
+    "$json.profiles=$clean;" ^
+    "$json | ConvertTo-Json -Depth 3 | Set-Content $file -Encoding UTF8"
 
 if %errorlevel%==0 (
     call :Log "[SUCCESS] profiles.json updated with ID %newProfileId% and name %newProfileName%"
@@ -954,23 +962,23 @@ if not exist "%worldsFile%" (
 )
 
 for /f "tokens=* usebackq" %%R in (`powershell -NoProfile -Command ^
-  "$worlds = Get-Content '%worldsFile%' | ForEach-Object { $_.Trim() } | Where-Object {$_ -match '^\d+$'};" ^
-  "$file = Get-Content '%credentialsFile%' -Raw;" ^
-  "$pattern = '\[([0-9,\s]+)\]';" ^
-  "$removed = @();" ^
-  "$updated = [System.Text.RegularExpressions.Regex]::Replace($file, $pattern, {" ^
-  "  $raw = $args[0].Groups[1].Value;" ^
-  "  $nums = $raw -split ',' | ForEach-Object { $_.Trim() };" ^
-  "  $valid = $nums | Where-Object { $worlds -contains $_ };" ^
-  "  $invalid = $nums | Where-Object { $worlds -notcontains $_ };" ^
-  "  if ($invalid.Count -gt 0) { $script:removed += $invalid }" ^
-  "  if ($valid.Count -gt 0) { '[' + ($valid -join ', ') + ']' } else { '[]' }" ^
-  "});" ^
-  "if ($file -ne $updated) {" ^
-  "  $updated | Set-Content '%credentialsFile%' -Encoding UTF8;" ^
-  "  if ($removed.Count -gt 0) { 'REMOVED=' + ($removed -join ', ') }" ^
-  "  else { 'NOCHANGE' }" ^
-  "} else { 'NOCHANGE' }"`) do set "cleanupResult=%%R"
+    "$worlds = Get-Content '%worldsFile%' | ForEach-Object { $_.Trim() } | Where-Object {$_ -match '^\d+$'};" ^
+    "$file = Get-Content '%credentialsFile%' -Raw;" ^
+    "$pattern = '\[([0-9,\s]+)\]';" ^
+    "$removed = @();" ^
+    "$updated = [System.Text.RegularExpressions.Regex]::Replace($file, $pattern, {" ^
+    "    $raw = $args[0].Groups[1].Value;" ^
+    "    $nums = $raw -split ',' | ForEach-Object { $_.Trim() };" ^
+    "    $valid = $nums | Where-Object { $worlds -contains $_ };" ^
+    "    $invalid = $nums | Where-Object { $worlds -notcontains $_ };" ^
+    "    if ($invalid.Count -gt 0) { $script:removed += $invalid }" ^
+    "    if ($valid.Count -gt 0) { '[' + ($valid -join ', ') + ']' } else { '[]' }" ^
+    "});" ^
+    "if ($file -ne $updated) {" ^
+    "    $updated | Set-Content '%credentialsFile%' -Encoding UTF8;" ^
+    "    if ($removed.Count -gt 0) { 'REMOVED=' + ($removed -join ', ') }" ^
+    "    else { 'NOCHANGE' }" ^
+    "} else { 'NOCHANGE' }"`) do set "cleanupResult=%%R"
 
 if defined cleanupResult (
     if /I "!cleanupResult:~0,8!"=="REMOVED=" (
@@ -1057,14 +1065,14 @@ if not exist "%authFile%" (
 
 :: This single PowerShell command handles reading the file, selecting the code, and displaying the mixed-color result.
 powershell -NoProfile -Command ^
-  "$codes = Get-Content '%authFile%' | Select-String -Pattern '([A-Za-z0-9]{6})' -AllMatches | ForEach-Object { $_.Matches.Groups[1].Value };" ^
-  "if ($codes.Count -gt 0) {" ^
-  "  $randIndex = Get-Random -Maximum $codes.Count;" ^
-  "  Write-Host 'BAT file completion code: ' -NoNewline -ForegroundColor White;" ^
-  "  Write-Host $codes[$randIndex] -ForegroundColor Cyan" ^
-  "} else {" ^
-  "  Write-Host 'BAT file completion code: [ERROR] No 6-digit codes found in file.' -ForegroundColor Red" ^
-  "}"
+    "$codes = Get-Content '%authFile%' | Select-String -Pattern '([A-Za-z0-9]{6})' -AllMatches | ForEach-Object { $_.Matches.Groups[1].Value };" ^
+    "if ($codes.Count -gt 0) {" ^
+    "    $randIndex = Get-Random -Maximum $codes.Count;" ^
+    "    Write-Host 'BAT file completion code: ' -NoNewline -ForegroundColor White;" ^
+    "    Write-Host $codes[$randIndex] -ForegroundColor Cyan" ^
+    "} else {" ^
+    "    Write-Host 'BAT file completion code: [ERROR] No 6-digit codes found in file.' -ForegroundColor Red" ^
+    "}"
 
 :EndDisplay
 echo.
