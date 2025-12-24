@@ -838,43 +838,37 @@ if not exist "%tempWaspFile%" (
     exit /b
 )
 
-:: Generate random 8-char name
+set "chars=abcdefghijklmnopqrstuvwxyz0123456789"
 set "name="
 for /l %%i in (1,1,8) do (
     set /a "r=!random! %% 36"
-    if !r! lss 10 (
-        set "c=!r!"
-    ) else (
-        set /a "c=!r!+87"
-        for /f %%C in ('powershell -NoProfile -Command "[char](!c!)"') do set "c=%%C"
-    )
-    set "name=!name!!c!"
+    for %%j in (!r!) do set "name=!name!!chars:~%%j,1!"
 )
 
-:: Compute ID
-for /f %%I in ('powershell -NoProfile -Command "[int[]]([char[]]'!name!') | Measure-Object -Sum | %%{$_.Sum}"') do set "id=%%I"
+set "id_sum=0"
+for /l %%i in (0,1,7) do (
+    set "char=!name:~%%i,1!"
+    for /f "delims=" %%k in ('powershell -NoProfile -Command "[int][char]'!char!'"') do (
+        set /a "id_sum+=%%k"
+    )
+)
+set "id=!id_sum!"
 
-:: Build final file path in RuneLite profiles2
 set "finalWaspFile=%runeLiteProfiles2%\%name%-%id%.properties"
 
-:: Copy profile into place
 copy /y "%tempWaspFile%" "%finalWaspFile%" >> "%logFile%" 2>&1
 if exist "%finalWaspFile%" (
-    call :Log "[SUCCESS] wasp-profile.properties copied as %name%-%id%.properties"
+    call :Log "[SUCCESS] Profile created: %name%-%id%.properties"
 ) else (
-    call :Log "[FAILED] Could not copy wasp-profile.properties to %finalWaspFile%"
+    call :Log "[FAILED] Could not copy profile to %finalWaspFile%"
     exit /b
 )
 
-:: Launch RuneLite silently (output suppressed), wait 3s, then kill it
 start "" /min powershell -WindowStyle Hidden -Command ^
-    "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden -RedirectStandardOutput '$env:TEMP\rl_stdout.log' -RedirectStandardError '$env:TEMP\rl_stderr.log';" ^
+    "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden;" ^
     "Start-Sleep -Seconds 3;" ^
     "Stop-Process -Name 'RuneLite' -Force"
 
-call :Log "[INFO] RuneLite started silently. Will close in 3 seconds..."
-
-:: Update profiles.json with the new random profile
 call :UpdateProfilesJson "%name%" "%id%"
 exit /b
 
@@ -1078,3 +1072,4 @@ powershell -NoProfile -Command ^
 echo.
 endlocal
 exit /b
+
