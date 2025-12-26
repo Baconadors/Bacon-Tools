@@ -398,6 +398,10 @@ call :CreateFolders
 :: ==================== CLEANUP OLD INSTALLATIONS =====================
 call :CleanRegistry
 call :KillProcesses
+
+:: ==================== CHECK DISPLAY SCALING =====================
+call :CheckAndSetDisplayScaling
+
 call :AddDefenderExclusions
 
 call :Log "[INFO] Flushing DNS resolver cache..."
@@ -667,6 +671,78 @@ for %%p in (Simba32.exe Simba64.exe RuneLite.exe JagexLauncher.exe) do (
     taskkill /f /im %%p >> "%logFile%" 2>&1
 )
 exit /b
+
+:CheckAndSetDisplayScaling
+:: Detect current DPI from multiple sources
+set "currentDPI="
+
+:: Check PerMonitorSettings (most reliable on Windows 10/11)
+for /f "tokens=*" %%a in ('powershell -NoProfile -Command ^
+    "$path = 'HKCU:\Control Panel\Desktop\PerMonitorSettings';" ^
+    "if (Test-Path $path) {" ^
+    "    $monitors = Get-ChildItem $path;" ^
+    "    if ($monitors.Count -gt 0) {" ^
+    "        $dpiValue = (Get-ItemProperty -Path $monitors[0].PSPath -Name DpiValue -ErrorAction SilentlyContinue).DpiValue;" ^
+    "        if ($null -ne $dpiValue) {" ^
+    "            switch ($dpiValue) {" ^
+    "                0 { Write-Output 96 }" ^
+    "                1 { Write-Output 120 }" ^
+    "                2 { Write-Output 144 }" ^
+    "                3 { Write-Output 168 }" ^
+    "                4 { Write-Output 192 }" ^
+    "                default { Write-Output 96 }" ^
+    "            }" ^
+    "        }" ^
+    "    }" ^
+    "}"') do set "currentDPI=%%a"
+
+:: Fallback to WindowMetrics AppliedDPI
+if not defined currentDPI (
+    for /f "tokens=3" %%a in ('reg query "HKCU\Control Panel\Desktop\WindowMetrics" /v AppliedDPI 2^>nul ^| find "AppliedDPI"') do (
+        set "tempVal=%%a"
+        for /f %%b in ('powershell -NoProfile -Command "if ('!tempVal!' -match '^0x') { [Convert]::ToInt32('!tempVal!', 16) } else { !tempVal! }"') do set "currentDPI=%%b"
+    )
+)
+
+:: Default to 96 if detection fails
+if not defined currentDPI set "currentDPI=96"
+
+:: Check if already at 100%
+if "%currentDPI%"=="96" exit /b 0
+
+:: Set to 100% (96 DPI)
+call :Log "[INFO] Updating display scaling to 100%%..."
+
+reg add "HKCU\Control Panel\Desktop" /v LogPixels /t REG_DWORD /d 96 /f >> "%logFile%" 2>&1
+reg add "HKCU\Control Panel\Desktop" /v Win8DpiScaling /t REG_DWORD /d 1 /f >> "%logFile%" 2>&1
+reg add "HKCU\Control Panel\Desktop" /v DpiScalingVer /t REG_DWORD /d 0x00001018 /f >> "%logFile%" 2>&1
+reg add "HKCU\Control Panel\Desktop\WindowMetrics" /v AppliedDPI /t REG_DWORD /d 96 /f >> "%logFile%" 2>&1
+
+powershell -NoProfile -Command ^
+    "$path = 'HKCU:\Control Panel\Desktop\PerMonitorSettings';" ^
+    "if (Test-Path $path) {" ^
+    "    Get-ChildItem $path | ForEach-Object {" ^
+    "        Set-ItemProperty -Path $_.PSPath -Name DpiValue -Value 0 -Type DWord -ErrorAction SilentlyContinue" ^
+    "    }" ^
+    "}" >> "%logFile%" 2>&1
+
+powershell -NoProfile -Command ^
+    "$code = '[DllImport(\"user32.dll\", CharSet=CharSet.Auto)] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, IntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out IntPtr lpdwResult); [DllImport(\"user32.dll\")] public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);';" ^
+    "$type = Add-Type -MemberDefinition $code -Name 'NativeMethods' -Namespace 'Win32' -PassThru;" ^
+    "$type::SystemParametersInfo(0x009F, 0, [IntPtr]::Zero, 0x03);" ^
+    "$result = [IntPtr]::Zero;" ^
+    "$type::SendMessageTimeout(0xFFFF, 0x001A, [IntPtr]::Zero, 'WindowMetrics', 0x0002, 5000, [ref]$result);" ^
+    "$type::SendMessageTimeout(0xFFFF, 0x001A, [IntPtr]::Zero, 'ImmersiveColorSet', 0x0002, 5000, [ref]$result);" ^
+    "$type::SendMessageTimeout(0xFFFF, 0x007E, [IntPtr]::Zero, $null, 0x0002, 5000, [ref]$result)" >> "%logFile%" 2>&1
+
+taskkill /f /im explorer.exe >> "%logFile%" 2>&1
+timeout /t 2 /nobreak >nul
+start explorer.exe
+timeout /t 4 /nobreak >nul
+
+call :Log "[SUCCESS] Display scaling updated to 100%%"
+
+exit /b 0
 
 :AddDefenderExclusions
 call :Log "[INFO] Adding Defender exclusions..."
@@ -1072,4 +1148,3 @@ powershell -NoProfile -Command ^
 echo.
 endlocal
 exit /b
-
