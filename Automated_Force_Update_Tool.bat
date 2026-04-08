@@ -647,6 +647,7 @@ exit /b
 call :Log "[INFO] Restoring backed up credentials and configs..."
 if exist "%backupSessionPath%\Simba\credentials.simba" copy /y "%backupSessionPath%\Simba\credentials.simba" "%simbaPath%\" >> "%logFile%" 2>&1
 if exist "%backupSessionPath%\Simba\Configs" xcopy /s /e /y "%backupSessionPath%\Simba\Configs" "%simbaPath%\Configs\" >> "%logFile%" 2>&1
+if exist "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" xcopy /y /i "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" "%simbaPath%\Includes\WaspLib\" >> "%logFile%" 2>&1
 exit /b
 
 :CleanCredentialsWorlds
