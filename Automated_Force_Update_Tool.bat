@@ -475,12 +475,16 @@ for /f "skip=10 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.
 exit /b
 
 :ConfigureDNS
-call :Log "[INFO] Configuring DNS override on active network adapter (Connection will drop momentarily drop)..."
+call :Log "[INFO] Flushing old DNS cache..."
+ipconfig /flushdns >nul 2>&1
+
+call :Log "[INFO] Configuring DNS overrides on active adapter (Connection will momentarily drop while resetting)..."
 powershell -NoProfile -Command ^
     "$adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1;" ^
     "if ($adapter) {" ^
-    "    Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses ('1.1.1.1', '8.8.8.8') -ErrorAction SilentlyContinue;" ^
+    "    Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses ('208.67.222.222', '9.9.9.9') -ErrorAction SilentlyContinue;" ^
     "    $adapter | Disable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue;" ^
+    "    Start-Sleep -Seconds 3;" ^
     "    $adapter | Enable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue;" ^
     "}"
 if %errorlevel% equ 0 (
