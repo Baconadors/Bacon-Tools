@@ -267,9 +267,6 @@ call :RotateLogs
 call :RotateBackups
 call :RotateProfileBackups
 
-:: ==================== CONFIGURE NETWORK DNS =====================
-call :ConfigureDNS
-
 :: ==================== SETUP REQUIREMENTS =====================
 call :Setup7Zip
 call :CreateFolders
@@ -452,7 +449,7 @@ exit /b
 
 :RotateLogs
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
-for /f "skip=10 delims=" %%F in ('2^>nul dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do (
+for /f "skip=5 delims=" %%F in ('2^>nul dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do (
     del "%backupRootPath%\%%F"
     call :Log "[INFO] Deleted old log %%F"
 )
@@ -460,7 +457,7 @@ exit /b
 
 :RotateBackups
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
-for /f "skip=10 delims=" %%F in ('2^>nul dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do (
+for /f "skip=5 delims=" %%F in ('2^>nul dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do (
     del "%backupRootPath%\%%F"
     call :Log "[INFO] Deleted old backup %%F"
 )
@@ -468,29 +465,9 @@ exit /b
 
 :RotateProfileBackups
 if not exist "%runeLiteProfiles2%" mkdir "%runeLiteProfiles2%"
-for /f "skip=10 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
+for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
     del "%runeLiteProfiles2%\%%F"
     call :Log "[INFO] Deleted old profiles.json backup %%F"
-)
-exit /b
-
-:ConfigureDNS
-call :Log "[INFO] Flushing old DNS cache..."
-ipconfig /flushdns >nul 2>&1
-
-call :Log "[INFO] Configuring DNS overrides on active adapter (Connection will momentarily drop while resetting)..."
-powershell -NoProfile -Command ^
-    "$adapter = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1;" ^
-    "if ($adapter) {" ^
-    "    Set-DnsClientServerAddress -InterfaceIndex $adapter.InterfaceIndex -ServerAddresses ('208.67.222.222', '9.9.9.9') -ErrorAction SilentlyContinue;" ^
-    "    $adapter | Disable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue;" ^
-    "    Start-Sleep -Seconds 3;" ^
-    "    $adapter | Enable-NetAdapter -Confirm:$false -ErrorAction SilentlyContinue;" ^
-    "}"
-if %errorlevel% equ 0 (
-    call :Log "[SUCCESS] DNS configured and network adapter reset successfully."
-) else (
-    call :Log "[WARN] DNS configuration script completed with adjustments."
 )
 exit /b
 
@@ -691,10 +668,10 @@ call :Log "[INFO] Performing Final Cleanup..."
 if exist "%tempBackupPath%" rmdir /s /q "%tempBackupPath%"
 if exist "%backupSessionPath%" rmdir /s /q "%backupSessionPath%"
 for /d %%D in ("%backupRootPath%\*") do rmdir /s /q "%%~fD"
-for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do del "%backupRootPath%\%%F"
-for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do del "%backupRootPath%\%%F"
+for /f "skip=5 delims=" %%F in ('dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do del "%backupRootPath%\%%F"
+for /f "skip=5 delims=" %%F in ('dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do del "%backupRootPath%\%%F"
 del /q "%forceUpdatePath%\*PreLog*.log" >nul 2>&1
-for /f "skip=10 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do del "%runeLiteProfiles2%\%%F"
+for /f "skip=5 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do del "%runeLiteProfiles2%\%%F"
 exit /b
 
 :DisplayCompletionCode
