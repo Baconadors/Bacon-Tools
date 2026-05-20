@@ -197,7 +197,7 @@ set "expectedProfileHash="
 for /f %%I in ('type "%tmpProfileHashFile%"') do set "expectedProfileHash=%%I"
 for /f %%U in ('echo %expectedProfileHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedProfileHash=%%U"
 if exist "%profileFile%" (
-    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%profileFile%').Hash.ToUpper()"`) do set "localProfileHash=%%I"
+    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%profileFile%').Hash.ToUpper()"`) do set "localProfileHash=NONE"
 ) else (
     set "localProfileHash=NONE"
 )
@@ -266,6 +266,9 @@ call :InitLogging
 call :RotateLogs
 call :RotateBackups
 call :RotateProfileBackups
+
+:: ==================== CONFIGURE HOSTS FILE =====================
+call :ConfigureHosts
 
 :: ==================== SETUP REQUIREMENTS =====================
 call :Setup7Zip
@@ -449,7 +452,7 @@ exit /b
 
 :RotateLogs
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
-for /f "skip=5 delims=" %%F in ('2^>nul dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do (
+for /f "skip=10 delims=" %%F in ('2^>nul dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do (
     del "%backupRootPath%\%%F"
     call :Log "[INFO] Deleted old log %%F"
 )
@@ -457,7 +460,7 @@ exit /b
 
 :RotateBackups
 if not exist "%backupRootPath%" mkdir "%backupRootPath%"
-for /f "skip=5 delims=" %%F in ('2^>nul dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do (
+for /f "skip=10 delims=" %%F in ('2^>nul dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do (
     del "%backupRootPath%\%%F"
     call :Log "[INFO] Deleted old backup %%F"
 )
@@ -465,9 +468,36 @@ exit /b
 
 :RotateProfileBackups
 if not exist "%runeLiteProfiles2%" mkdir "%runeLiteProfiles2%"
-for /f "skip=5 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
+for /f "skip=10 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
     del "%runeLiteProfiles2%\%%F"
     call :Log "[INFO] Deleted old profiles.json backup %%F"
+)
+exit /b
+
+:ConfigureHosts
+call :Log "[INFO] Flushing DNS resolver cache..."
+ipconfig /flushdns >nul 2>&1
+
+call :Log "[INFO] Mapping waspscripts.com in the hosts file..."
+powershell -NoProfile -Command ^
+    "$h = \"$env:windir\system32\drivers\etc\hosts\";" ^
+    "$t = Get-Content $h;" ^
+    "$doms = @('db.waspscripts.com', 'waspscripts.com', 'db.waspscripts.dev', 'waspscripts.dev');" ^
+    "$ip = '185.152.66.247';" ^
+    "$out = @();" ^
+    "foreach ($line in $t) {" ^
+    "    $matched = $false;" ^
+    "    foreach ($d in $doms) {" ^
+    "        if ($line -match \"\b$([regex]::Escape($d))\b\") { $matched = $true; break }" ^
+    "    }" ^
+    "    if (-not $matched) { $out += $line }" ^
+    "}" ^
+    "foreach ($d in $doms) { $out += \"$ip`t$d\" }" ^
+    "Set-Content -Path $h -Value $out -Force -Encoding ASCII"
+if %errorlevel% equ 0 (
+    call :Log "[SUCCESS] Windows hosts file mapped successfully."
+) else (
+    call :Log "[WARN] Hosts file modification encountered issues."
 )
 exit /b
 
@@ -668,10 +698,11 @@ call :Log "[INFO] Performing Final Cleanup..."
 if exist "%tempBackupPath%" rmdir /s /q "%tempBackupPath%"
 if exist "%backupSessionPath%" rmdir /s /q "%backupSessionPath%"
 for /d %%D in ("%backupRootPath%\*") do rmdir /s /q "%%~fD"
-for /f "skip=5 delims=" %%F in ('dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do del "%backupRootPath%\%%F"
-for /f "skip=5 delims=" %%F in ('dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do del "%backupRootPath%\%%F"
+for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\Simba_RuneLite_Backup_*.7z" /b /o-d') do del "%backupRootPath%\%%F"
+for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do del "%backupRootPath%\%%F"
 del /q "%forceUpdatePath%\*PreLog*.log" >nul 2>&1
-for /f "skip=5 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do del "%runeLiteProfiles2%\%%F"
+for /f "skip=10 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do del "%runeLiteProfiles2%\%%F"
+call :Log "[SUCCESS] Cleanup finished."
 exit /b
 
 :DisplayCompletionCode
