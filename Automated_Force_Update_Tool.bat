@@ -660,6 +660,7 @@ for /l %%i in (0,1,7) do (
 )
 set "id=!id_sum!"
 copy /y "%tempWaspFile%" "%runeLiteProfiles2%\%name%-%id%.properties" >> "%logFile%" 2>&1
+call :Log "[SUCCESS] wasp-profile.properties copied as %name%-%id%.properties"
 start "" /min powershell -WindowStyle Hidden -Command "Start-Process -FilePath '%runeLitePath%\RuneLite.exe' -WindowStyle Hidden; Start-Sleep -Seconds 3; Stop-Process -Name 'RuneLite' -Force"
 call :UpdateProfilesJson "%name%" "%id%"
 exit /b
@@ -669,8 +670,21 @@ set "newProfileName=%~1"
 set "newProfileId=%~2"
 call :Log "[INFO] Updating profiles.json..."
 if exist "%profilesJson%" copy "%profilesJson%" "%profilesJson%.bak_%datetime%" >nul
-if not exist "%profilesJson%" echo { "profiles": [] } > "%profilesJson%"
-powershell -NoProfile -Command "$f='%profilesJson%'; $j=Get-Content $f -Raw | ConvertFrom-Json; if($null -eq $j.profiles){$j=@{profiles=@()}}; $c=@(); foreach($p in $j.profiles){if($p.id -eq %newProfileId% -or $p.name -eq '%newProfileName%'){continue} $p.active=$false; $c+=$p}; $n=[PSCustomObject]@{id=%newProfileId%; name='%newProfileName%'; sync=$false; active=$true; rev=-1; defaultForRsProfiles=@()}; $c+=$n; $j.profiles=$c; $j | ConvertTo-Json -Depth 3 | Set-Content $f -Encoding UTF8"
+if not exist "%profilesJson%" echo {"profiles":[]} > "%profilesJson%"
+powershell -NoProfile -Command ^
+    "$f='%profilesJson%';" ^
+    "$j=Get-Content $f -Raw | ConvertFrom-Json;" ^
+    "if($null -eq $j.profiles){$j=@{profiles=@()}};" ^
+    "$c=@();" ^
+    "foreach($p in $j.profiles){" ^
+    "    if($p.id -eq %newProfileId% -or $p.name -eq '%newProfileName%'){continue}" ^
+    "    $p.active=$false;" ^
+    "    $c+=$p" ^
+    "};" ^
+    "$n=[PSCustomObject]@{id=[long]%newProfileId%; name='%newProfileName%'; sync=$true; active=$true; rev=-1; defaultForRsProfiles=@()};" ^
+    "$c+=$n;" ^
+    "$j.profiles=$c;" ^
+    "($j | ConvertTo-Json -Depth 3 -Compress) -replace '\s+', '' | Set-Content $f -Encoding ASCII"
 exit /b
 
 :AutoRestore
