@@ -119,15 +119,7 @@ jobs:
           path: .target_commit_sha
           key: target-sha-${{ steps.target_sha.outputs.latest_sha }}
 
-      - name: Download Target Repository ZIP and Generate Hash
-        if: steps.cache_sha.outputs.cache-hit != 'true'
-        run: |
-          echo "${{ steps.target_sha.outputs.latest_sha }}" > .target_commit_sha
-          curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
-          sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
-
       - name: Get Latest Release Info
-        if: steps.cache_sha.outputs.cache-hit != 'true'
         id: get_release
         uses: octokit/request-action@v2.x
         with:
@@ -135,8 +127,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify Existing Release Assets
+        id: verify_asset
+        run: |
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+          asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+            | jq -r '.[] | select(.name == "wasp-assets.sha256") | .id')
+          
+          if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
+            echo "missing=true" >> $GITHUB_OUTPUT
+            echo "wasp-assets.sha256 is missing from the release assets."
+          else
+            echo "missing=false" >> $GITHUB_OUTPUT
+            echo "wasp-assets.sha256 exists in release assets."
+          fi
+
+      - name: Download Target Repository ZIP and Generate Hash
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.missing == 'true'
+        run: |
+          echo "${{ steps.target_sha.outputs.latest_sha }}" > .target_commit_sha
+          curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
+          sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
+
       - name: Upload Repository Hash to Release
-        if: steps.cache_sha.outputs.cache-hit != 'true'
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.missing == 'true'
         run: |
           release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
