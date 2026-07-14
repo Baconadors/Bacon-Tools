@@ -9,8 +9,6 @@ on:
       - main
     paths:
       - 'Automated_Force_Update_Tool.bat'
-      - 'Setup_File_Downloader.bat'
-      - 'Windows_Defender_Exclusion_Tool.bat'
       - 'wasp-profile.properties'
       - 'worlds.txt'
       - 'settings.ini'
