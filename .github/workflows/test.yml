@@ -3,7 +3,7 @@ name: Update Worlds and Release Assets test
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 */12 * * *"
   push:
     branches:
       - main
@@ -107,12 +107,29 @@ jobs:
           git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
           git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
 
-      - name: Download Target Repository ZIP and Generate Hash
+      - name: Fetch Latest Target Commit SHA
+        id: target_sha
         run: |
+          sha=$(git ls-remote https://github.com/4T0M5PL1TT3R/wasp-assets.git refs/heads/main | awk '{print $1}')
+          echo "latest_sha=$sha" >> $GITHUB_OUTPUT
+          echo "Latest commit on target main branch: $sha"
+
+      - name: Check Cache for Last Processed SHA
+        id: cache_sha
+        uses: actions/cache@v3
+        with:
+          path: .target_commit_sha
+          key: target-sha-${{ steps.target_sha.outputs.latest_sha }}
+
+      - name: Download Target Repository ZIP and Generate Hash
+        if: steps.cache_sha.outputs.cache-hit != 'true'
+        run: |
+          echo "${{ steps.target_sha.outputs.latest_sha }}" > .target_commit_sha
           curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
           sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
 
       - name: Get Latest Release Info
+        if: steps.cache_sha.outputs.cache-hit != 'true'
         id: get_release
         uses: octokit/request-action@v2.x
         with:
@@ -120,13 +137,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Repository ZIP and Hash to Release
+      - name: Upload Repository Hash to Release
+        if: steps.cache_sha.outputs.cache-hit != 'true'
         run: |
           release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
 
-          for f in "wasp-assets.zip" "wasp-assets.sha256"; do
+          for f in "wasp-assets.sha256"; do
             if [ ! -f "$f" ]; then
               echo "❌ Required file $f not found, aborting upload."
               exit 1
@@ -153,4 +171,4 @@ jobs:
               }
           done
 
-          echo "✅ Upload complete for repository archive and hash."
+          echo "✅ Upload complete for repository hash."
