@@ -1,0 +1,156 @@
+name: Update Worlds and Release Assets
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 * * * *"
+  push:
+    branches:
+      - main
+    paths:
+      - 'Automated_Force_Update_Tool.bat'
+      - 'Setup_File_Downloader.bat'
+      - 'Windows_Defender_Exclusion_Tool.bat'
+      - 'wasp-profile.properties'
+      - 'worlds.txt'
+      - 'settings.ini'
+      - 'BAT_Auth.txt'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  update-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install Python Dependencies
+        run: pip install requests beautifulsoup4 lxml pytz
+
+      - name: Fetch and Parse OSRS World List
+        id: parse
+        run: |
+          python - <<'EOF'
+          import requests, pathlib, sys, os
+          from bs4 import BeautifulSoup
+          from datetime import datetime, timezone
+
+          url = "https://oldschool.runescape.wiki/w/Server"
+          resp = requests.get(url)
+          resp.raise_for_status()
+
+          soup = BeautifulSoup(resp.text, "lxml")
+
+          worlds = []
+          seen = set()
+
+          tables = soup.find_all("table", {"class": "wikitable"})
+          if not tables:
+              print("ERROR: Could not find any server list tables.")
+              sys.exit(1)
+
+          for table in tables:
+              for row in table.find_all("tr")[1:]:
+                  cells = [c.get_text(strip=True) for c in row.find_all("td")]
+                  if not cells:
+                      continue
+                  world = cells[0]
+                  if not world.isdigit():
+                      continue
+                  if world not in seen:
+                      seen.add(world)
+                      worlds.append(int(world))
+
+          world_count = len(worlds)
+          timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+          if world_count == 0:
+              print("ERROR: No valid worlds found — parser failed.")
+              sys.exit(1)
+
+          worlds.sort()
+          lines = [str(w) for w in worlds]
+
+          out_path = pathlib.Path("worlds.txt")
+          out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+          print(f"[INFO] Wrote {world_count} worlds to {out_path}")
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a") as fh:
+                  print(f"world_count={world_count}", file=fh)
+                  print(f"timestamp={timestamp}", file=fh)
+          EOF
+
+      - name: Commit Worlds File if Changed
+        run: |
+          if git diff --quiet worlds.txt; then
+            echo "No changes in worlds.txt"
+            exit 0
+          fi
+
+          git config user.name "Baconadors"
+          git config user.email "27475467+Baconadors@users.noreply.github.com"
+          git add worlds.txt
+          git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
+          git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
+
+      - name: Download Target Repository ZIP and Generate Hash
+        run: |
+          curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
+          sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
+
+      - name: Get Latest Release Info
+        id: get_release
+        uses: octokit/request-action@v2.x
+        with:
+          route: GET /repos/${{ github.repository }}/releases/latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Repository ZIP and Hash to Release
+        run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+
+          for f in "wasp-assets.zip" "wasp-assets.sha256"; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Required file $f not found, aborting upload."
+              exit 1
+            fi
+
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$f" '.[] | select(.name == $name) | .id')
+
+            if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
+              echo "Deleting old asset: $f (ID: $asset_id)"
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            echo "Uploading $f ..."
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$upload_url?name=$f&label=$f" || {
+                echo "❌ Failed to upload $f"
+                exit 1
+              }
+          done
+
+          echo "✅ Upload complete for repository archive and hash."
