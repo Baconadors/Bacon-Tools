@@ -3,18 +3,17 @@ name: Update Worlds and Release Assets
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "0 */12 * * *"
   push:
     branches:
       - main
     paths:
       - 'Automated_Force_Update_Tool.bat'
-      - 'Setup_File_Downloader.bat'
-      - 'Windows_Defender_Exclusion_Tool.bat'
       - 'wasp-profile.properties'
       - 'worlds.txt'
       - 'settings.ini'
       - 'BAT_Auth.txt'
+      - 'launcher.json'
 
 permissions:
   contents: write
@@ -107,33 +106,19 @@ jobs:
           git commit -m "Update OSRS world list: ${{ steps.parse.outputs.world_count }} worlds @ ${{ steps.parse.outputs.timestamp }}"
           git push https://x-access-token:${{ secrets.PAT_TOKEN }}@github.com/${{ github.repository }} HEAD:main
 
-      - name: Get Changed Files
-        id: changed
+      - name: Fetch Latest Target Commit SHA
+        id: target_sha
         run: |
-          git fetch --prune --unshallow || true
+          sha=$(git ls-remote https://github.com/4T0M5PL1TT3R/wasp-assets.git refs/heads/main | awk '{print $1}')
+          echo "latest_sha=$sha" >> $GITHUB_OUTPUT
+          echo "Latest commit on target main branch: $sha"
 
-          if git rev-parse HEAD^ >/dev/null 2>&1; then
-            echo "Comparing against HEAD^"
-            git diff --name-only HEAD^ HEAD > changed_raw.txt
-          else
-            echo "First commit on branch, using git show"
-            git show --pretty="" --name-only HEAD > changed_raw.txt
-          fi
-
-          echo "=== Raw changed files detected ==="
-          cat changed_raw.txt || true
-
-          grep -E '^(Automated_Force_Update_Tool\.bat|Setup_File_Downloader\.bat|Windows_Defender_Exclusion_Tool\.bat|wasp-profile\.properties|worlds\.txt|settings\.ini|BAT_Auth\.txt)$' \
-            changed_raw.txt > changed.txt || true
-
-          echo "=== Filtered changed files ==="
-          cat changed.txt || echo "None after filtering"
-
-          changedFiles=$(cat changed.txt | sort -u)
-          echo "changed=$changedFiles" >> $GITHUB_OUTPUT
-
-          echo "=== Changed files (output variable) ==="
-          echo "$changedFiles"
+      - name: Check Cache for Last Processed SHA
+        id: cache_sha
+        uses: actions/cache@v3
+        with:
+          path: .target_commit_sha
+          key: target-sha-${{ steps.target_sha.outputs.latest_sha }}
 
       - name: Get Latest Release Info
         id: get_release
@@ -143,74 +128,99 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Changed Files to Release (REST API with Delete)
+      - name: Verify Existing Release Assets
+        id: verify_asset
+        run: |
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+          assets_list=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url")
+          
+          wasp_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "wasp-assets.sha256") | .id')
+          if [ -z "$wasp_id" ] || [ "$wasp_id" = "null" ]; then
+            echo "wasp_missing=true" >> $GITHUB_OUTPUT
+          else
+            echo "wasp_missing=false" >> $GITHUB_OUTPUT
+          fi
+
+          sha256sum launcher.json | awk '{print $1}' > launcher.sha256
+          local_hash=$(cat launcher.sha256 | tr -d '[:space:]')
+          
+          launcher_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "launcher.json") | .id')
+          sha_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "launcher.sha256") | .id')
+          
+          upload_launcher="false"
+          if [ -z "$launcher_id" ] || [ "$launcher_id" = "null" ] || [ -z "$sha_id" ] || [ "$sha_id" = "null" ]; then
+            upload_launcher="true"
+          else
+            old_hash=$(curl -s -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$sha_id" | tr -d '[:space:]')
+            if [ "$old_hash" != "$local_hash" ]; then
+              upload_launcher="true"
+            fi
+          fi
+          echo "upload_launcher=$upload_launcher" >> $GITHUB_OUTPUT
+
+      - name: Download Target Repository ZIP and Generate Hash
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.wasp_missing == 'true'
+        run: |
+          echo "${{ steps.target_sha.outputs.latest_sha }}" > .target_commit_sha
+          curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
+          sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
+
+      - name: Upload Repository Hash to Release
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.wasp_missing == 'true'
         run: |
           release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
 
-          echo "=== Release Info ==="
-          echo "Release ID: $release_id"
-          echo "Upload URL: $upload_url"
-          echo "Assets URL: $assets_url"
-
-          changedFiles="${{ steps.changed.outputs.changed }}"
-          echo "=== Files that will be processed for upload ==="
-          echo "$changedFiles"
-
-          if [ -z "$changedFiles" ]; then
-            echo "✅ No relevant files changed. Skipping upload."
-            exit 0
-          fi
-
-          uploaded_hashes=()
-
-          for file in $changedFiles; do
-            if [ ! -f "$file" ]; then
-              echo "⚠️ $file not found in repo, skipping"
-              continue
-            fi
-            if [ ! -s "$file" ]; then
-              echo "⚠️ $file is empty, skipping"
-              continue
+          for f in "wasp-assets.sha256"; do
+            if [ ! -f "$f" ]; then
+              exit 1
             fi
 
-            echo "Processing $file"
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$f" '.[] | select(.name == $name) | .id')
 
-            baseName=$(basename "$file")
-            baseNameNoExt="${baseName%%.*}"
-            shaFile="$baseNameNoExt.sha256"
-
-            if printf '%s\n' "${uploaded_hashes[@]}" | grep -q -x "$baseNameNoExt"; then
-              echo "✅ SHA256 already generated for $baseNameNoExt, skipping duplicate"
-            else
-              sha256sum "$file" | awk '{print $1}' > "$shaFile"
-              uploaded_hashes+=("$baseNameNoExt")
+            if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
             fi
 
-            for f in "$file" "$shaFile"; do
-              echo "Preparing $f for upload..."
-
-              asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
-                | jq --arg name "$(basename "$f")" '.[] | select(.name == $name) | .id')
-
-              if [ -n "$asset_id" ]; then
-                echo "Deleting old asset: $(basename "$f") (ID: $asset_id)"
-                curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                     "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
-              fi
-
-              echo "Uploading $f ..."
-              curl \
-                -X POST \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Content-Type: application/octet-stream" \
-                --data-binary @"$f" \
-                "$upload_url?name=$(basename "$f")&label=$(basename "$f")" || {
-                  echo "❌ Failed to upload $f"
-                  exit 1
-                }
-            done
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$upload_url?name=$f&label=$f" || {
+                exit 1
+              }
           done
 
-          echo "✅ Upload complete for all changed files."
+      - name: Upload Launcher and Hash to Release
+        if: steps.verify_asset.outputs.upload_launcher == 'true'
+        run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+
+          for f in "launcher.json" "launcher.sha256"; do
+            if [ ! -f "$f" ]; then
+              exit 1
+            fi
+
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$f" '.[] | select(.name == $name) | .id')
+
+            if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$upload_url?name=$f&label=$f" || {
+                exit 1
+              }
+          done
