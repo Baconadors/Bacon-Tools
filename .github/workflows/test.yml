@@ -1,4 +1,4 @@
-name: Update Worlds and Release Assets test
+name: Update Worlds and Release Assets
 
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ on:
       - 'worlds.txt'
       - 'settings.ini'
       - 'BAT_Auth.txt'
+      - 'launcher.json'
 
 permissions:
   contents: write
@@ -131,26 +132,41 @@ jobs:
         id: verify_asset
         run: |
           assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
-          asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
-            | jq -r '.[] | select(.name == "wasp-assets.sha256") | .id')
+          assets_list=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url")
           
-          if [ -z "$asset_id" ] || [ "$asset_id" = "null" ]; then
-            echo "missing=true" >> $GITHUB_OUTPUT
-            echo "wasp-assets.sha256 is missing from the release assets."
+          wasp_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "wasp-assets.sha256") | .id')
+          if [ -z "$wasp_id" ] || [ "$wasp_id" = "null" ]; then
+            echo "wasp_missing=true" >> $GITHUB_OUTPUT
           else
-            echo "missing=false" >> $GITHUB_OUTPUT
-            echo "wasp-assets.sha256 exists in release assets."
+            echo "wasp_missing=false" >> $GITHUB_OUTPUT
           fi
 
+          sha256sum launcher.json | awk '{print $1}' > launcher.sha256
+          local_hash=$(cat launcher.sha256 | tr -d '[:space:]')
+          
+          launcher_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "launcher.json") | .id')
+          sha_id=$(echo "$assets_list" | jq -r '.[] | select(.name == "launcher.sha256") | .id')
+          
+          upload_launcher="false"
+          if [ -z "$launcher_id" ] || [ "$launcher_id" = "null" ] || [ -z "$sha_id" ] || [ "$sha_id" = "null" ]; then
+            upload_launcher="true"
+          else
+            old_hash=$(curl -s -L -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/$sha_id" | tr -d '[:space:]')
+            if [ "$old_hash" != "$local_hash" ]; then
+              upload_launcher="true"
+            fi
+          fi
+          echo "upload_launcher=$upload_launcher" >> $GITHUB_OUTPUT
+
       - name: Download Target Repository ZIP and Generate Hash
-        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.missing == 'true'
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.wasp_missing == 'true'
         run: |
           echo "${{ steps.target_sha.outputs.latest_sha }}" > .target_commit_sha
           curl -L -o wasp-assets.zip https://github.com/4T0M5PL1TT3R/wasp-assets/archive/refs/heads/main.zip
           sha256sum wasp-assets.zip | awk '{print $1}' > wasp-assets.sha256
 
       - name: Upload Repository Hash to Release
-        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.missing == 'true'
+        if: steps.cache_sha.outputs.cache-hit != 'true' || steps.verify_asset.outputs.wasp_missing == 'true'
         run: |
           release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
           upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
@@ -158,7 +174,6 @@ jobs:
 
           for f in "wasp-assets.sha256"; do
             if [ ! -f "$f" ]; then
-              echo "❌ Required file $f not found, aborting upload."
               exit 1
             fi
 
@@ -166,21 +181,46 @@ jobs:
               | jq --arg name "$f" '.[] | select(.name == $name) | .id')
 
             if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
-              echo "Deleting old asset: $f (ID: $asset_id)"
               curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
                    "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
             fi
 
-            echo "Uploading $f ..."
             curl \
               -X POST \
               -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
               -H "Content-Type: application/octet-stream" \
               --data-binary @"$f" \
               "$upload_url?name=$f&label=$f" || {
-                echo "❌ Failed to upload $f"
                 exit 1
               }
           done
 
-          echo "✅ Upload complete for repository hash."
+      - name: Upload Launcher and Hash to Release
+        if: steps.verify_asset.outputs.upload_launcher == 'true'
+        run: |
+          release_id=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.id')
+          upload_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.upload_url' | sed 's/{.*}//')
+          assets_url=$(echo '${{ steps.get_release.outputs.data }}' | jq -r '.assets_url')
+
+          for f in "launcher.json" "launcher.sha256"; do
+            if [ ! -f "$f" ]; then
+              exit 1
+            fi
+
+            asset_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" "$assets_url" \
+              | jq --arg name "$f" '.[] | select(.name == $name) | .id')
+
+            if [ -n "$asset_id" ] && [ "$asset_id" != "null" ]; then
+              curl -s -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                   "https://api.github.com/repos/${{ github.repository }}/releases/assets/$asset_id"
+            fi
+
+            curl \
+              -X POST \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$upload_url?name=$f&label=$f" || {
+                exit 1
+              }
+          done
