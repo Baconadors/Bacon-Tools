@@ -1,4 +1,4 @@
-name: Update Worlds and Release Assets
+name: Update Worlds and Release Assets test
 
 on:
   workflow_dispatch:
