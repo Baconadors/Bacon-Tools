@@ -3,6 +3,11 @@
 @echo off
 setlocal EnableDelayedExpansion
 
+:: Record execution baseline entry timestamp window
+for /f "tokens=1-4 delims=:.," %%a in ("%time%") do (
+    set /a "start_h=%%a, start_m=%%b, start_s=%%c"
+)
+
 :: ==================== IMMEDIATE ADMIN CHECK AND SELF-ELEVATION =====================
 call :CheckAdmin
 if %errorlevel% neq 0 (
@@ -20,6 +25,8 @@ set "debugUpdateWorlds=true"
 set "debugUpdateProfile=true"
 set "debugUpdateSettings=true"
 set "debugUpdateAuth=true"
+set "debugUpdateAssetHash=true"
+set "debugUpdateLauncher=true"
 
 set "debugRunInstallSimba=true"
 set "debugRunInstallRuneLite=true"
@@ -39,7 +46,7 @@ if /I "%debugUpdateBat%"=="true" (
     set "tmpScript=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.bat"
     set "tmpHashFile=%LOCALAPPDATA%\SimbaForceUpdate\Automated_Force_Update_Tool.sha256"
     set "preLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaForceUpdate_PreLog_%RANDOM%.log"
-    call :PreLog "[INFO] Starting script auto-update check..."
+    call :PreLog "[INFO] Starting script auto-update check. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpHashFile%" "%latestHashUrl%" >> "%preLog%" 2>&1
     if %errorlevel% neq 0 (
         call :PreLog "[ERROR] curl failed when downloading script hash."
@@ -62,7 +69,7 @@ for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algori
 if /I "%localHash%"=="%expectedHash%" (
     call :PreLog "[INFO] Script is up-to-date."
 ) else (
-    call :PreLog "[WARNING] Script is outdated. Updating..."
+    call :PreLog "[WARNING] Script is outdated. Updating. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpScript%" "%latestScriptUrl%" >> "%preLog%" 2>&1
     if exist "%tmpScript%" (
         copy /y "%tmpScript%" "%thisScript%" >nul
@@ -84,11 +91,12 @@ set "authFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.txt"
 set "authTmpFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth_tmp.txt"
 set "authHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/BAT_Auth.sha256"
 set "authUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/BAT_Auth.txt"
-set "tmpAuthHashFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.sha256"
+set "tmpAuthHashFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.sha256.tmp"
+set "localAuthHashFile=%LOCALAPPDATA%\SimbaForceUpdate\BAT_Auth.sha256"
 set "preAuthLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaAuthUpdate_PreLog_%RANDOM%.log"
 
 if /I "%debugUpdateAuth%"=="true" (
-    call :PreLog "[INFO] Starting BAT_Auth.txt auto-update check..."
+    call :PreLog "[INFO] Starting BAT_Auth.txt auto-update check. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpAuthHashFile%" "%authHashUrl%" >> "%preAuthLog%" 2>&1
     if exist "%tmpAuthHashFile%" (
         set "doAuthUpdate=1"
@@ -104,20 +112,22 @@ goto AuthUpdaterEnd
 
 :AuthRunUpdater
 set "expectedAuthHash="
-for /f %%I in ('type "%tmpAuthHashFile%"') do set "expectedAuthHash=%%I"
+for /f "usebackq tokens=1" %%I in ("%tmpAuthHashFile%") do set "expectedAuthHash=%%I"
 for /f %%U in ('echo %expectedAuthHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedAuthHash=%%U"
-if exist "%authFile%" (
-    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%authFile%').Hash.ToUpper()"`) do set "localAuthHash=%%I"
+if exist "%localAuthHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%localAuthHashFile%") do set "localAuthHash=%%I"
+    for /f %%U in ('echo !localAuthHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localAuthHash=%%U"
 ) else (
     set "localAuthHash=NONE"
 )
 if /I "%localAuthHash%"=="%expectedAuthHash%" (
     call :PreLog "[INFO] BAT_Auth.txt is up-to-date."
 ) else (
-    call :PreLog "[WARNING] BAT_Auth.txt is outdated. Updating..."
+    call :PreLog "[WARNING] BAT_Auth.txt is outdated. Updating. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%authTmpFile%" "%authUrl%" >> "%preAuthLog%" 2>&1
     if exist "%authTmpFile%" (
         copy /y "%authTmpFile%" "%authFile%" >nul
+        copy /y "%tmpAuthHashFile%" "%localAuthHashFile%" >nul
         call :PreLog "[SUCCESS] BAT_Auth.txt updated."
     )
 )
@@ -131,11 +141,12 @@ goto AuthUpdaterEnd
 set "worldsFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.txt"
 set "worldsHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/worlds.sha256"
 set "worldsUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/worlds.txt"
-set "tmpWorldsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.sha256"
+set "tmpWorldsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.sha256.tmp"
+set "localWorldsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\worlds.sha256"
 set "preWorldsLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaWorldsUpdate_PreLog_%RANDOM%.log"
 
 if /I "%debugUpdateWorlds%"=="true" (
-    call :PreLog "[INFO] Starting worlds.txt auto-update check..."
+    call :PreLog "[INFO] Starting worlds.txt auto-update check. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpWorldsHashFile%" "%worldsHashUrl%" >> "%preWorldsLog%" 2>&1
     if exist "%tmpWorldsHashFile%" (
         set "doWorldsUpdate=1"
@@ -151,18 +162,20 @@ goto WorldsUpdaterEnd
 
 :WorldsRunUpdater
 set "expectedWorldsHash="
-for /f %%I in ('type "%tmpWorldsHashFile%"') do set "expectedWorldsHash=%%I"
+for /f "usebackq tokens=1" %%I in ("%tmpWorldsHashFile%") do set "expectedWorldsHash=%%I"
 for /f %%U in ('echo %expectedWorldsHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedWorldsHash=%%U"
-if exist "%worldsFile%" (
-    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%worldsFile%').Hash.ToUpper()"`) do set "localWorldsHash=%%I"
+if exist "%localWorldsHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%localWorldsHashFile%") do set "localWorldsHash=%%I"
+    for /f %%U in ('echo !localWorldsHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localWorldsHash=%%U"
 ) else (
     set "localWorldsHash=NONE"
 )
 if /I "%localWorldsHash%"=="%expectedWorldsHash%" (
     call :PreLog "[INFO] worlds.txt is up-to-date."
 ) else (
-    call :PreLog "[WARNING] worlds.txt is outdated. Updating..."
+    call :PreLog "[WARNING] worlds.txt is outdated. Updating. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%worldsFile%" "%worldsUrl%" >> "%preWorldsLog%" 2>&1
+    copy /y "%tmpWorldsHashFile%" "%localWorldsHashFile%" >nul
     call :PreLog "[SUCCESS] worlds.txt updated."
 )
 del "%tmpWorldsHashFile%" >nul 2>&1
@@ -174,11 +187,12 @@ goto WorldsUpdaterEnd
 set "profileFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.properties"
 set "profileHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.sha256"
 set "profileUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
-set "tmpProfileHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.sha256"
+set "tmpProfileHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.sha256.tmp"
+set "localProfileHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-profile.sha256"
 set "preProfileLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaProfileUpdate_PreLog_%RANDOM%.log"
 
 if /I "%debugUpdateProfile%"=="true" (
-    call :PreLog "[INFO] Starting wasp-profile.properties auto-update check..."
+    call :PreLog "[INFO] Starting wasp-profile.properties auto-update check. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpProfileHashFile%" "%profileHashUrl%" >> "%preProfileLog%" 2>&1
     if exist "%tmpProfileHashFile%" (
         set "doProfileUpdate=1"
@@ -194,18 +208,20 @@ goto ProfileUpdaterEnd
 
 :ProfileRunUpdater
 set "expectedProfileHash="
-for /f %%I in ('type "%tmpProfileHashFile%"') do set "expectedProfileHash=%%I"
+for /f "usebackq tokens=1" %%I in ("%tmpProfileHashFile%") do set "expectedProfileHash=%%I"
 for /f %%U in ('echo %expectedProfileHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedProfileHash=%%U"
-if exist "%profileFile%" (
-    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%profileFile%').Hash.ToUpper()"`) do set "localProfileHash=NONE"
+if exist "%localProfileHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%localProfileHashFile%") do set "localProfileHash=%%I"
+    for /f %%U in ('echo !localProfileHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localProfileHash=%%U"
 ) else (
     set "localProfileHash=NONE"
 )
 if /I "%localProfileHash%"=="%expectedProfileHash%" (
     call :PreLog "[INFO] wasp-profile.properties is up-to-date."
 ) else (
-    call :PreLog "[WARNING] wasp-profile.properties is outdated. Updating..."
+    call :PreLog "[WARNING] wasp-profile.properties is outdated. Updating. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L -o "%profileFile%" "%profileUrl%" >> "%preProfileLog%" 2>&1
+    copy /y "%tmpProfileHashFile%" "%localProfileHashFile%" >nul
     call :PreLog "[SUCCESS] wasp-profile.properties updated."
 )
 del "%tmpProfileHashFile%" >nul 2>&1
@@ -217,11 +233,12 @@ goto ProfileUpdaterEnd
 set "settingsFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.ini"
 set "settingsHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.sha256"
 set "settingsUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.ini"
-set "tmpSettingsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.sha256"
+set "tmpSettingsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.sha256.tmp"
+set "localSettingsHashFile=%LOCALAPPDATA%\SimbaForceUpdate\settings.sha256"
 set "preSettingsLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaSettingsUpdate_PreLog_%RANDOM%.log"
 
 if /I "%debugUpdateSettings%"=="true" (
-    call :PreLog "[INFO] Starting settings.ini auto-update check..."
+    call :PreLog "[INFO] Starting settings.ini auto-update check. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpSettingsHashFile%" "%settingsHashUrl%" >> "%preSettingsLog%" 2>&1
     if exist "%tmpSettingsHashFile%" (
         set "doSettingsUpdate=1"
@@ -237,24 +254,115 @@ goto SettingsUpdaterEnd
 
 :SettingsRunUpdater
 set "expectedSettingsHash="
-for /f %%I in ('type "%tmpSettingsHashFile%"') do set "expectedSettingsHash=%%I"
+for /f "usebackq tokens=1" %%I in ("%tmpSettingsHashFile%") do set "expectedSettingsHash=%%I"
 for /f %%U in ('echo %expectedSettingsHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedSettingsHash=%%U"
-if exist "%settingsFile%" (
-    for /f "usebackq" %%I in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%settingsFile%').Hash.ToUpper()"`) do set "localSettingsHash=%%I"
+if exist "%localSettingsHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%localSettingsHashFile%") do set "localSettingsHash=%%I"
+    for /f %%U in ('echo !localSettingsHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localSettingsHash=%%U"
 ) else (
     set "localSettingsHash=NONE"
 )
 if /I "%localSettingsHash%"=="%expectedSettingsHash%" (
     call :PreLog "[INFO] settings.ini is up-to-date."
 ) else (
-    call :PreLog "[WARNING] settings.ini is outdated. Updating..."
+    call :PreLog "[WARNING] settings.ini is outdated. Updating. Please Wait..."
     %SystemRoot%\System32\curl.exe -s -L --fail -o "%settingsFile%" "%settingsUrl%" >> "%preSettingsLog%" 2>&1
+    copy /y "%tmpSettingsHashFile%" "%localSettingsHashFile%" >nul
     call :PreLog "[SUCCESS] settings.ini updated."
 )
 del "%tmpSettingsHashFile%" >nul 2>&1
 goto SettingsUpdaterEnd
 
 :SettingsUpdaterEnd
+
+:: ==================== AUTO-UPDATER (WASP-ASSETS.SHA256) =====================
+set "assetHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-assets.sha256"
+set "assetHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-assets.sha256"
+set "tmpAssetHashFile=%LOCALAPPDATA%\SimbaForceUpdate\wasp-assets.sha256.tmp"
+set "preAssetHashLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaAssetHashUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateAssetHash%"=="true" (
+    call :PreLog "[INFO] Fetching core application assets signature verification files. Please Wait..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpAssetHashFile%" "%assetHashUrl%" >> "%preAssetHashLog%" 2>&1
+    if exist "%tmpAssetHashFile%" (
+        set "doAssetHashUpdate=1"
+    ) else (
+        set "doAssetHashUpdate=0"
+    )
+) else (
+    set "doAssetHashUpdate=0"
+)
+
+if "%doAssetHashUpdate%"=="1" goto AssetHashRunUpdater
+goto AssetHashUpdaterEnd
+
+:AssetHashRunUpdater
+set "expectedAssetHashFile="
+for /f "usebackq tokens=1" %%I in ("%tmpAssetHashFile%") do set "expectedAssetHashFile=%%I"
+for /f %%U in ('echo %expectedAssetHashFile% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedAssetHashFile=%%U"
+if exist "%assetHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%assetHashFile%") do set "localAssetHashFile=%%I"
+    for /f %%U in ('echo !localAssetHashFile! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localAssetHashFile=%%U"
+) else (
+    set "localAssetHashFile=NONE"
+)
+if /I "%localAssetHashFile%"=="%expectedAssetHashFile%" (
+    call :PreLog "[INFO] wasp-assets.sha256 is up-to-date."
+) else (
+    call :PreLog "[WARNING] wasp-assets.sha256 is outdated. Updating. Please Wait..."
+    copy /y "%tmpAssetHashFile%" "%assetHashFile%" >nul
+    call :PreLog "[SUCCESS] wasp-assets.sha256 updated."
+)
+del "%tmpAssetHashFile%" >nul 2>&1
+goto AssetHashUpdaterEnd
+
+:AssetHashUpdaterEnd
+
+:: ==================== AUTO-UPDATER (LAUNCHER.JSON) =====================
+set "launcherFile=%LOCALAPPDATA%\SimbaForceUpdate\launcher.json"
+set "launcherHashFile=%LOCALAPPDATA%\SimbaForceUpdate\launcher.sha256"
+set "launcherHashUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/launcher.sha256"
+set "launcherUrl=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/launcher.json"
+set "tmpLauncherHashFile=%LOCALAPPDATA%\SimbaForceUpdate\launcher.sha256.tmp"
+set "preLauncherLog=%LOCALAPPDATA%\SimbaForceUpdate\SimbaLauncherUpdate_PreLog_%RANDOM%.log"
+
+if /I "%debugUpdateLauncher%"=="true" (
+    call :PreLog "[INFO] Starting launcher.json auto-update check. Please Wait..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%tmpLauncherHashFile%" "%launcherHashUrl%" >> "%preLauncherLog%" 2>&1
+    if exist "%tmpLauncherHashFile%" (
+        set "doLauncherUpdate=1"
+    ) else (
+        set "doLauncherUpdate=0"
+    )
+) else (
+    set "doLauncherUpdate=0"
+)
+
+if "%doLauncherUpdate%"=="1" goto LauncherRunUpdater
+goto LauncherUpdaterEnd
+
+:LauncherRunUpdater
+set "expectedLauncherHash="
+for /f "usebackq tokens=1" %%I in ("%tmpLauncherHashFile%") do set "expectedLauncherHash=%%I"
+for /f %%U in ('echo %expectedLauncherHash% ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "expectedLauncherHash=%%U"
+if exist "%launcherHashFile%" (
+    for /f "usebackq tokens=1" %%I in ("%launcherHashFile%") do set "localLauncherHash=%%I"
+    for /f %%U in ('echo !localLauncherHash! ^| powershell -NoProfile -Command "$input.ToUpper()"') do set "localLauncherHash=%%U"
+) else (
+    set "localLauncherHash=NONE"
+)
+if /I "%localLauncherHash%"=="%expectedLauncherHash%" (
+    call :PreLog "[INFO] launcher.json is up-to-date."
+) else (
+    call :PreLog "[WARNING] launcher.json is outdated. Updating. Please Wait..."
+    %SystemRoot%\System32\curl.exe -s -L --fail -o "%launcherFile%" "%launcherUrl%" >> "%preLauncherLog%" 2>&1
+    copy /y "%tmpLauncherHashFile%" "%launcherHashFile%" >nul
+    call :PreLog "[SUCCESS] launcher.json updated."
+)
+del "%tmpLauncherHashFile%" >nul 2>&1
+goto LauncherUpdaterEnd
+
+:LauncherUpdaterEnd
 
 :: ==================== DEFINE PATHS =====================
 call :DefinePaths
@@ -319,6 +427,7 @@ if /I "%debugRunUninstallRuneLite%"=="true" (
 if /I "%debugRunInstallSimba%"=="true" (
     call :InstallSimba
     call :ConfigureSimba
+    call :DeployWaspAssets
 ) else (
     call :Log "[INFO] Skipping InstallSimba and ConfigureSimba (debugRunInstallSimba=false)."
 )
@@ -350,8 +459,17 @@ if /I "%debugRunCleanup%"=="true" (
 call :Log "[INFO] Backup location: %backupZipPath%"
 call :Log "[INFO] Script complete."
 
+:: Calculate total dynamic runtime tracking window metrics
+for /f "tokens=1-4 delims=:.," %%a in ("%time%") do (
+    set /a "end_h=%%a, end_m=%%b, end_s=%%c"
+)
+set /a "tot_start=(start_h * 3600) + (start_m * 60) + start_s"
+set /a "tot_end=(end_h * 3600) + (end_m * 60) + end_s"
+if %tot_end% lss %tot_start% set /a "tot_end+=86400"
+set /a "elapsed_seconds=tot_end - tot_start"
+
 for /f "tokens=* usebackq" %%a in (`powershell -NoProfile -Command "Get-Date -Format 'ddd, dd/MM/yyyy @ HH:mm:ss'"`) do set "rundate=%%a"
-call :Log "[DONE] Run finished on %rundate%"
+call :Log "[DONE] Run finished in !elapsed_seconds!s on %rundate%"
 echo. >> "%logFile%"
 
 :: Display completion code logic
@@ -375,7 +493,7 @@ exit /b 1
 
 :DefinePaths
 for /f %%I in ('powershell -NoProfile -Command "Get-Date -Format ddMMyyyy_HHmmss" 2^>nul') do set "datetime=%%I"
-set "simbaPath=%LOCALAPPDATA%\Simba"
+set "simPath=%LOCALAPPDATA%\Simba"
 set "runeLitePath=%LOCALAPPDATA%\RuneLite"
 set "runeLiteProfilePath=%USERPROFILE%\.runelite"
 set "tempBackupPath=%LOCALAPPDATA%\SimbaBackupTMP"
@@ -385,7 +503,7 @@ set "backupSessionPath=%backupRootPath%\Backup_%datetime%"
 set "backupZipPath=%backupRootPath%\Simba_RuneLite_Backup_%datetime%.7z"
 set "simbaSetupPath=%forceUpdatePath%\simba-setup_%datetime%.exe"
 set "runeLiteSetupPath=%forceUpdatePath%\RuneLiteSetup_%datetime%.exe"
-set "simba64ExePath=%simbaPath%\Simba64.exe"
+set "simba64ExePath=%simPath%\Simba64.exe"
 set "runeLiteUninstallerPath=%runeLitePath%\unins000.exe"
 set "simba64ShortcutPath=%USERPROFILE%\Desktop\Simba64.lnk"
 set "portable7zDir=%LOCALAPPDATA%\SimbaTools"
@@ -394,7 +512,12 @@ set "logFile=%backupRootPath%\SimbaUpdate_%datetime%.log"
 set "runeLiteProfiles2=%USERPROFILE%\.runelite\profiles2"
 set "profilesJson=%runeLiteProfiles2%\profiles.json"
 set "waspProfileURL=https://github.com/Baconadors/Bacon-Tools/releases/latest/download/wasp-profile.properties"
-set "credentialsFile=%simbaPath%\credentials.simba"
+set "credentialsFile=%simPath%\credentials.simba"
+set "launcherJson=%simPath%\Configs\launcher.json"
+set "launcherAssetsURL=https://raw.githubusercontent.com/4T0M5PL1TT3R/wasp-assets/refs/heads/main/"
+set "assetsZip=%forceUpdatePath%\wasp-assets_%datetime%.zip"
+set "assetsDestDir=%simPath%\Data\assets"
+set "waspAssetsURL=https://codeload.github.com/4T0M5PL1TT3R/wasp-assets/zip/refs/heads/main"
 exit /b
 
 :InitLogging
@@ -413,6 +536,18 @@ if exist "%preAuthLog%" (
     type "%preAuthLog%" >> "%logFile%"
     echo === AUTH-UPDATER LOG END === >> "%logFile%"
     del "%preAuthLog%" >nul 2>&1
+)
+if exist "%preAssetHashLog%" (
+    echo === ASSET-HASH LOG START === >> "%logFile%"
+    type "%preAssetHashLog%" >> "%logFile%"
+    echo === ASSET-HASH LOG END === >> "%logFile%"
+    del "%preAssetHashLog%" >nul 2>&1
+)
+if exist "%preLauncherLog%" (
+    echo === LAUNCHER LOG START === >> "%logFile%"
+    type "%preLauncherLog%" >> "%logFile%"
+    echo === LAUNCHER LOG END === >> "%logFile%"
+    del "%preLauncherLog%" >nul 2>&1
 )
 exit /b
 
@@ -468,7 +603,7 @@ exit /b
 
 :RotateProfileBackups
 if not exist "%runeLiteProfiles2%" mkdir "%runeLiteProfiles2%"
-for /f "skip=10 delims=" %%F in ('2^>nul dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
+for /f "skip=10 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do (
     del "%runeLiteProfiles2%\%%F"
     call :Log "[INFO] Deleted old profiles.json backup %%F"
 )
@@ -504,8 +639,8 @@ exit /b
 :Setup7Zip
 if not exist "%portable7zDir%" mkdir "%portable7zDir%"
 if not exist "%portable7zPath%" (
-    call :Log "[INFO] 7-Zip not found. Downloading..."
-    curl -s -L -o "%portable7zPath%" "https://www.7-zip.org/a/7zr.exe" >> "%logFile%" 2>&1
+    call :Log "[INFO] Native 64-bit 7-Zip engine not found. Fetching framework component. Please Wait..."
+    curl -s -L -o "%portable7zPath%" "https://www.7-zip.org/a/7zr.exe"
 )
 exit /b
 
@@ -524,9 +659,9 @@ if "%vcFound%"=="true" (
     call :Log "[INFO] Visual C++ 2015-2022 already installed."
     exit /b 0
 )
-call :Log "[WARN] Visual C++ 2015-2022 (x64) not found. Downloading..."
+call :Log "[WARN] Visual C++ 2015-2022 (x64) not found. Downloading. Please Wait..."
 set "vcInstaller=%forceUpdatePath%\vc_redist.x64.exe"
-curl -s -L --fail -o "%vcInstaller%" "https://aka.ms/vs/17/release/vc_redist.x64.exe" >> "%logFile%" 2>&1
+curl -s -L --fail -o "%vcInstaller%" "https://aka.ms/vs/17/release/vc_redist.x64.exe"
 if not exist "%vcInstaller%" exit /b 1
 call :Log "[INFO] Installing VC++ 2015-2022 (x64) silently..."
 start /wait "" "%vcInstaller%" /quiet /norestart
@@ -578,19 +713,21 @@ exit /b 0
 :AddDefenderExclusions
 call :Log "[INFO] Adding Defender exclusions..."
 set "failFlag=0"
-powershell -Command "Add-MpPreference -ExclusionPath '%simbaPath%'" >> "%logFile%" 2>&1
+powershell -Command "Add-MpPreference -ExclusionPath '%simPath%'" >> "%logFile%" 2>&1
 if %errorlevel% neq 0 set "failFlag=1"
 powershell -Command "Add-MpPreference -ExclusionPath '%tempBackupPath%'" >> "%logFile%" 2>&1
 if %errorlevel% neq 0 set "failFlag=1"
 powershell -Command "Add-MpPreference -ExclusionPath '%forceUpdatePath%'" >> "%logFile%" 2>&1
+if %errorlevel% neq 0 set "failFlag=1"
+powershell -Command "Add-MpPreference -ExclusionProcess 'simba-setup_*.exe'" >> "%logFile%" 2>&1
 if %errorlevel% neq 0 set "failFlag=1"
 if %failFlag%==0 call :Log "[SUCCESS] Defender exclusions added successfully"
 exit /b
 
 :BackupData
 call :Log "[INFO] Backing up existing data..."
-if exist "%simbaPath%" (
-    xcopy /s /e /y "%simbaPath%" "%backupSessionPath%\Simba\" >> "%logFile%" 2>&1
+if exist "%simPath%" (
+    xcopy /s /e /y "%simPath%" "%backupSessionPath%\Simba\" >> "%logFile%" 2>&1
     call :Log "[SUCCESS] Backed up Simba folder"
 )
 if exist "%runeLiteProfilePath%" (
@@ -609,7 +746,7 @@ exit /b
 
 :RemoveOldSimba
 call :Log "[INFO] Removing old Simba folder..."
-if exist "%simbaPath%" rmdir /s /q "%simbaPath%"
+if exist "%simPath%" rmdir /s /q "%simPath%"
 exit /b
 
 :UninstallRuneLite
@@ -621,32 +758,68 @@ if exist "%runeLiteUninstallerPath%" (
 exit /b
 
 :InstallSimba
-call :Log "[INFO] Downloading Simba installer..."
+call :Log "[INFO] Downloading Simba installer. Please Wait..."
 del /q "%forceUpdatePath%\simba-setup_*.exe" >nul 2>&1
-curl -s -L -o "%simbaSetupPath%" "https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe" >> "%logFile%" 2>&1
+
+%SystemRoot%\System32\curl.exe -s -L --fail -o "%simbaSetupPath%" "https://github.com/torwent/wasp-setup/releases/latest/download/simba-setup.exe"
+
+if exist "%simbaSetupPath%" (
+    for %%A in ("%simbaSetupPath%") do set "fsize=%%~zA"
+    if !fsize! gtr 0 (
+        goto DownloadSimbaSuccess
+    )
+)
+call :Log "[ERROR] Failed to verify downloaded baseline payload structure."
+exit /b 1
+
+:DownloadSimbaSuccess
 start /wait "" "%simbaSetupPath%" --silent
 call :Log "[SUCCESS] Simba installation completed."
 exit /b
 
 :ConfigureSimba
 call :Log "[INFO] Configuring Simba post-install..."
-if not exist "%simbaPath%\Data" mkdir "%simbaPath%\Data"
-curl -s -L -o "%forceUpdatePath%\settings.ini" "https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.ini" >> "%logFile%" 2>&1
-copy /y "%forceUpdatePath%\settings.ini" "%simbaPath%\Data\settings.ini" >> "%logFile%" 2>&1
-attrib +R "%simbaPath%\Data\settings.ini"
-ftype simba.script="%simbaPath%\Simba64.exe" "%%1" >> "%logFile%" 2>&1
+if not exist "%simPath%\Data" mkdir "%simPath%\Data"
+if not exist "%simPath%\Configs" mkdir "%simPath%\Configs"
+
+if exist "%launcherFile%" (
+    copy /y "%launcherFile%" "%simPath%\Configs\launcher.json" >> "%logFile%" 2>&1
+    call :Log "[SUCCESS] Repository launcher.json configuration mapped successfully."
+)
+
+call :Log "[INFO] Downloading settings configuration profile. Please Wait..."
+curl -s -L -o "%forceUpdatePath%\settings.ini" "https://github.com/Baconadors/Bacon-Tools/releases/latest/download/settings.ini"
+copy /y "%forceUpdatePath%\settings.ini" "%simPath%\Data\settings.ini" >> "%logFile%" 2>&1
+attrib +R "%simPath%\Data\settings.ini"
+ftype simba.script=%simPath%\Simba64.exe "%%1" >> "%logFile%" 2>&1
 assoc .simba=simba.script >> "%logFile%" 2>&1
 call :Log "[SUCCESS] settings.ini applied."
+
+if exist "%launcherJson%" (
+    call :Log "[INFO] Patching launcher.json asset boundaries..."
+    powershell -NoProfile -Command ^
+        "$f='%launcherJson%';" ^
+        "$j=Get-Content $f -Raw | ConvertFrom-Json;" ^
+        "if($null -eq $j){$j=@{}};" ^
+        "$j | Add-Member -NotePropertyName 'assets_url' -NotePropertyValue '%launcherAssetsURL%' -Force;" ^
+        "$j | ConvertTo-Json -Depth 30 | Set-Content $f -Encoding ASCII"
+    if %errorlevel% equ 0 (
+        call :Log "[SUCCESS] launcher.json assets patched successfully."
+    ) else (
+        call :Log "[WARN] launcher.json patch encountered an issue."
+    )
+)
 exit /b
 
 :InstallRuneLite
-call :Log "[INFO] Downloading RuneLite installer..."
+call :Log "[INFO] Downloading RuneLite installer. Please Wait..."
 del /q "%forceUpdatePath%\RuneLiteSetup_*.exe" >nul 2>&1
-curl -s -L -o "%runeLiteSetupPath%" "https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe" >> "%logFile%" 2>&1
+curl -s -L -o "%runeLiteSetupPath%" "https://github.com/runelite/launcher/releases/latest/download/RuneLiteSetup.exe"
 start /wait "" "%runeLiteSetupPath%" /Silent
 call :Log "[SUCCESS] RuneLite installation completed."
 set "tempWaspFile=%forceUpdatePath%\wasp-profile.properties"
-curl -s -L -o "%tempWaspFile%" "%waspProfileURL%" >> "%logFile%" 2>&1
+call :Log "[INFO] Downloading Wasp framework properties. Please Wait..."
+curl -s -L -o "%tempWaspFile%" "%waspProfileURL%"
 set "chars=abcdefghijklmnopqrstuvwxyz0123456789"
 set "name="
 for /l %%i in (1,1,8) do (
@@ -689,9 +862,9 @@ exit /b
 
 :AutoRestore
 call :Log "[INFO] Restoring backed up credentials and configs..."
-if exist "%backupSessionPath%\Simba\credentials.simba" copy /y "%backupSessionPath%\Simba\credentials.simba" "%simbaPath%\" >> "%logFile%" 2>&1
-if exist "%backupSessionPath%\Simba\Configs" xcopy /s /e /y "%backupSessionPath%\Simba\Configs" "%simbaPath%\Configs\" >> "%logFile%" 2>&1
-if exist "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" xcopy /y /i "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" "%simbaPath%\Includes\WaspLib\" >> "%logFile%" 2>&1
+if exist "%backupSessionPath%\Simba\credentials.simba" copy /y "%backupSessionPath%\Simba\credentials.simba" "%simPath%\" >> "%logFile%" 2>&1
+if exist "%backupSessionPath%\Simba\Configs" robocopy "%backupSessionPath%\Simba\Configs" "%simPath%\Configs" /e /r:1 /w:1 /xf launcher.json /nfl /ndl /nc /ns /np >nul
+if exist "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" xcopy /y /i "%backupSessionPath%\Simba\Includes\WaspLib\overrides.simba" "%simPath%\Includes\WaspLib\" >> "%logFile%" 2>&1
 exit /b
 
 :CleanCredentialsWorlds
@@ -703,8 +876,8 @@ exit /b
 
 :CreateShortcuts
 call :Log "[INFO] Creating desktop shortcut..."
-powershell "$s=(New-Object -COM WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath='%simbaPath%\Simba64.exe'; $s.Save()" >> "%logFile%" 2>&1
-if exist "%simbaPath%\Simba32.exe" del "%simbaPath%\Simba32.exe"
+powershell "$s=(New-Object -COM WScript.Shell).CreateShortcut('%simba64ShortcutPath%'); $s.TargetPath='%simPath%\Simba64.exe'; $s.Save()" >> "%logFile%" 2>&1
+if exist "%simPath%\Simba32.exe" del "%simPath%\Simba32.exe"
 exit /b
 
 :FinalCleanup
@@ -716,6 +889,7 @@ for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\Simba_RuneLite_Backup_*.
 for /f "skip=10 delims=" %%F in ('dir "%backupRootPath%\SimbaUpdate_*.log" /b /o-d') do del "%backupRootPath%\%%F"
 del /q "%forceUpdatePath%\*PreLog*.log" >nul 2>&1
 for /f "skip=10 delims=" %%F in ('dir "%runeLiteProfiles2%\profiles.json.bak_*" /b /o-d') do del "%runeLiteProfiles2%\%%F"
+del /q "%forceUpdatePath%\*.sha256" >nul 2>&1
 call :Log "[SUCCESS] Cleanup finished."
 exit /b
 
@@ -742,4 +916,72 @@ powershell -NoProfile -Command ^
 :EndDisplay
 echo.
 endlocal
+exit /b
+
+:DeployWaspAssets
+call :Log "[INFO] Fetching core application assets from target repository... Please Wait..."
+if not exist "%assetsDestDir%" mkdir "%assetsDestDir%"
+
+del /q "%forceUpdatePath%\wasp-assets_*.zip" >nul 2>&1
+
+%SystemRoot%\System32\curl.exe -s -L --fail -o "%assetsZip%" "%waspAssetsURL%"
+
+if exist "%assetsZip%" (
+    for %%A in ("%assetsZip%") do set "asize=%%~zA"
+    if !asize! gtr 0 (
+        goto DownloadAssetsSuccess
+    )
+)
+call :Log "[ERROR] Asset framework payload failed validation loops. Skipping deployment."
+exit /b 1
+
+:DownloadAssetsSuccess
+set "hashVerified=false"
+if exist "%assetHashFile%" (
+    for /f "usebackq tokens=1" %%H in ("%assetHashFile%") do set "expectedAssetHash=%%H"
+    for /f "usebackq tokens=1" %%U in (`powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '%assetsZip%').Hash.ToUpper()"`) do set "calculatedAssetHash=%%U"
+    for /f "usebackq tokens=1" %%E in (`powershell -NoProfile -Command "'!expectedAssetHash!'.ToUpper()"`) do set "expectedAssetHash=%%E"
+    
+    call :Log "[INFO] Comparing local archive checksum against server signature verification manifest..."
+    if "!calculatedAssetHash!"=="!expectedAssetHash!" (
+        call :Log "[SUCCESS] Hash match verified successfully: !calculatedAssetHash!"
+        set "hashVerified=true"
+    ) else (
+        call :Log "[ERROR] Hash integrity fault mismatch. Local: !calculatedAssetHash! | Server: !expectedAssetHash!"
+    )
+) else (
+    call :Log "[WARN] Manifest hash verification target missing. Extracting with standard tracking checks."
+    set "hashVerified=true"
+)
+
+if "!hashVerified!"=="false" (
+    call :Log "[ERROR] Asset baseline checksum verification aborted. Skipping deployment block extraction."
+    exit /b 1
+)
+
+call :Log "[INFO] Unpacking target asset directories via native Windows engine..."
+set "assetsExtractTmp=%forceUpdatePath%\wasp_assets_extract_tmp"
+if exist "!assetsExtractTmp!" rmdir /s /q "!assetsExtractTmp!"
+mkdir "!assetsExtractTmp!"
+
+powershell -NoProfile -Command "$ProgressPreference = 'SilentlyContinue'; Expand-Archive -Path '%assetsZip%' -DestinationPath '!assetsExtractTmp!' -Force" >> "%logFile%" 2>&1
+
+set "wrapperDir="
+for /f "delims=" %%I in ('dir "!assetsExtractTmp!" /b /ad') do set "wrapperDir=%%I"
+
+if defined wrapperDir if exist "!assetsExtractTmp!\!wrapperDir!" (
+    for %%d in (finders fonts images jsons map) do (
+        if exist "!assetsExtractTmp!\!wrapperDir!\%%d" (
+            robocopy "!assetsExtractTmp!\!wrapperDir!\%%d" "%assetsDestDir%\%%d" /e /r:1 /w:1 /nfl /ndl /nc /ns /np >nul
+        )
+    )
+    if exist "!assetsExtractTmp!\!wrapperDir!\hashes1400.json" (
+        copy /y "!assetsExtractTmp!\!wrapperDir!\hashes1400.json" "%assetsDestDir%\" >> "%logFile%" 2>&1
+    )
+    call :Log "[SUCCESS] Wasp asset frameworks deployed successfully."
+) else (
+    call :Log "[ERROR] Dynamic extraction parsing encountered variable boundary mismatch."
+)
+
+rmdir /s /q "!assetsExtractTmp!" >> "%logFile%" 2>&1
 exit /b
