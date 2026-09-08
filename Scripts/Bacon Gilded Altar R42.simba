@@ -1,0 +1,3340 @@
+{$DEFINE SCRIPT_ID := '200ba90c-76c1-4f40-bcb5-e09f0b676ba5'}
+{$DEFINE SCRIPT_REVISION := '42'}
+{$I WaspLib/main.simba}
+
+{
+---------------------------------------------------------------------------------------------------------------------
+| HAVE ISSUES?! Please report any issues in the script thread                                                        |
+| with a screenshot with Simba AND RuneLite fully visible with                                                       |
+| any sensitive information censored. Please upload the log file located at                                                  |
+| Simba\Configs\GildedAltar\Logs to your post with the requested screenshot.                                        |
+| Screenshot example: https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/ProblemSSExample.png?raw=true |
+| Script thread: https://discord.com/channels/795071177475227709/1383663998452502568                                 |
+---------------------------------------------------------------------------------------------------------------------
+}
+
+const
+  VERSION := 'Rev ' + {$MACRO SCRIPT_REVISION};
+
+  DEBUGMODE : Boolean := FALSE;
+
+  ALLBONES: TStringArray = ['(Auto)','Burnt', 'Wolf', 'Monkey', 'Bat', 'Big',
+                            'Jogre', 'Wyrmling', 'Zogre', 'Shaikahan',
+                            'Babydragon', 'Wyrm', 'Strykewyrm', 'Dragon', 'Wyvern', 'Drake',
+                            'Fayrg', 'Lava dragon', 'Raurg', 'Frost dragon', 'Hydra',
+                            'Dagannoth', 'Ourg', 'Superior dragon'];
+
+  Rimmington_Chunk: TMapChunk = [[45, 51, 47, 49], [0]];
+  RimmingtonChunk: TBox = [7592,37378,7804,37658];
+  PhialsLocation: TBox = [7688,37562,7708,37586];
+  RecoverBox: Tbox = [7684,37534,7724,37590];
+  WalkBackBox: Tbox = [7712,37550,7720,37562];
+
+type
+  EState = (LEAVE_HOUSE, ENTER_HOUSE, OPEN_HOUSE_ADS, ENTER_HOUSE_FROM_AD,
+            FIND_PHIALS, SELECT_NOTED_BONES, USE_NOTED_BONES_ON_PHIALS,
+            HANDLE_PHIALS_CHAT, USE_BONES_ON_ALTAR, OFFER_BONES, USE_POOL);
+
+  ECardinalDirection = (NORTH, SOUTH, EAST, WEST);
+
+  TAltarSearchResult = record
+    ATPA: T2DPointArray;
+    Direction: ECardinalDirection;
+    FoundAltar: Boolean;
+  end;
+
+  TCandidateFilterResult = record
+    ATPA: T2DPointArray;
+    FoundPrimary: Boolean;
+  end;
+
+  TAdvertisement = record
+    Index: Integer;
+    Name: String;
+    GildedAltar: Boolean;
+  end;
+
+  TBadPoh = record
+    Name: String;
+    Timestamp: Double;
+  end;
+
+  TAdvertisementList = array of TAdvertisement;
+
+  TBadPohList = array of TBadPoh;
+
+  TGUI = record(TScriptForm)
+    Config: TConfigJSON;
+    BGImgSettings, BGImgAccounts: TImage;
+    GPUModified, IsInitialized, gpuPluginActive: Boolean;
+    LastActiveProfile, LastActiveProfileFile: String;
+  end;
+
+  TSimpleTimer = record
+    StartTime: Int64;
+    Duration: Int64;
+  end;
+
+  TScript = record
+    State                                                     : EState;
+    Attempts, StartXP                                         : Integer;
+    NotedBonesSlot, BoneCount, CurrentRunEnergy, MinRunEnergy : Int32;
+    PohName, BoneType, ScriptSpeed                            : String;
+    BadPohs                                                   : TBadPohList;
+    RSW                                                       : TWalker;
+    UsingAltar, InBadPoh, InGoodPoh, TakeBreaks, TakeSleeps,
+    UseLitBurners, TurnOffChat, UsePOHPool,
+    UsedPortal, ConfirmPoolBox, ClickedPool, debugDrawing     : Boolean;
+    AltarDirection                                            : ECardinalDirection;
+    Runtime, TrueRunTime                                      : TStopwatch;
+    POHPlayer, POHBlacklist                                   : TStringArray;
+    Bones, CurrentBone                                        : TItem;
+    ShutdownTime, LastReportTime, LastXPTime                  : Int64;
+    ReportTimer                                               : TCountdown;
+    LastOfferTimer                                            : TSimpleTimer;
+    WaitingForXP, inPOH                                       : Boolean;
+    LastXPCheck, xpNow, xpDiff, expectedXP, StartingBones,
+    CoinSlot, notedBoneSlot, LastXPAmount                     : Int32;
+    SRLTVersion, WaspLibVersion, MinSRLT, MinWaspLib          : String;
+    ContinuedWithWaspWarning, ContinuedWithFixedWarning,
+    ContinuedWithSubWarning                                   : Boolean;
+end;
+
+Var
+  Bot      : TScript;
+  GUI      : TGUI;
+  ImgSettings, ImgAccounts, warnImg: TPicture;
+  warnTriangle140: TImage;
+  BONE_XP: array of Integer;
+
+  DebugATPA: T2DPointArray;
+
+  HouseAdvertisementScrollBg : TCTS2Color := CTS2(1910572, 3, 0.60, 0.91);
+  HouseAdvertisementScrollBox: TBox := [473, 97, 487, 270];
+  HouseAdvertisementPlayerNameBox: TBox := [43, 58, 138, 76];
+
+  AltarTop     : TCTS2Color := CTS2(8160645, 3, 1.58, 0.49);
+  AltarGold    : TCTS2Color := CTS2(2204607, 1, 0.16, 1.02);
+  AltarBook    : TCTS2Color := CTS2(10787737, 13, 0.24, 0.20);
+  AltarBase    : TCTS2Color := CTS2(2898248, 5, 0.30, 0.37);
+  AltarFront   : TCTS2Color := CTS2(2303527, 4, 1.19, 1.51);
+  AltarBones   : TCTS2Color := CTS2(14013913, 9, 0.95, 0.41);
+  AltarEffect  : TCTS2Color := CTS2(11572573, 10, 0.11, 1.85);
+
+  Phials                                          : TNPC;
+  AdvertBoard, GildedAltar, OrnatePool            : TGameObjectV2;
+
+function TScript.GetTakeBreaks: Boolean;
+begin
+  Result := Self.TakeBreaks;
+end;
+
+function TScript.GetTakeSleeps: Boolean;
+begin
+  Result := Self.TakeSleeps;
+end;
+
+function TScript.GetBone: TItem;
+begin
+  Result := Self.BoneType + ' bones';
+end;
+
+function TScript.GetPOHPlayer: TStringArray;
+begin
+  Result := Self.POHPlayer;
+end;
+
+function TScript.GetPOHBlacklist: TStringArray;
+begin
+  Result := Self.POHBlacklist;
+end;
+
+function TScript.GetLitBurner: Boolean;
+begin
+  Result := Self.UseLitBurners;
+end;
+
+function TScript.GetChatStatus: Boolean;
+begin
+  Result := Self.TurnOffChat;
+end;
+
+function TScript.GetPool: Boolean;
+begin
+  Result := Self.UsePOHPool;
+end;
+
+function TScript.GetDebugMode: Boolean;
+begin
+  Result := Self.debugDrawing;
+end;
+
+procedure FarmMsg(Msg: String);
+begin
+  Writeln(SRL.TimeStamp() + '[Farm]: ' + Msg);
+end;
+
+procedure DebugMsg(Msg: String);
+var
+  logFile: Integer;
+  folderPath, fileName, fullMsg, header: string;
+  isNew: Boolean;
+begin
+  fullMsg := SRL.TimeStamp() + ':[DEBUG]: ' + Msg;
+
+  if (not GUI.IsInitialized) or Bot.GetDebugMode() then
+    Writeln(fullMsg);
+
+  folderPath := AppPath + 'Configs' + DirectorySeparator + 'GildedAltar' + DirectorySeparator + 'Logs' + DirectorySeparator;
+  fileName := 'GA_Log_' + FormatDateTime('yyyy-mm-dd_hh-nn', Now()) + '.txt';
+
+  if not DirectoryExists(folderPath) then
+    ForceDirectories(folderPath);
+
+  isNew := not FileExists(folderPath + fileName);
+
+  try
+    if isNew then
+    begin
+      logFile := RewriteFile(folderPath + fileName, False);
+      if logFile <> -1 then
+      begin
+        header := '=== Gilded Altar Debug Log ===' + LineEnding +
+                  'Started: ' + FormatDateTime('yyyy-mm-dd hh:nn:ss', Now()) + LineEnding +
+                  '==============================' + LineEnding;
+        WriteFileString(logFile, header);
+      end;
+    end else
+      logFile := AppendFile(folderPath + fileName);
+
+    if logFile <> -1 then
+    begin
+      WriteFileString(logFile, fullMsg + LineEnding);
+      CloseFile(logFile);
+    end;
+  except
+  end;
+end;
+
+procedure TScript.LoginPlayer();
+var
+  originalWorlds: TIntegerArray;
+  index, attempts, retryTime: Int32;
+begin
+  DebugMsg('LoginPlayer -> Checking login status');
+  if GameClient.IsLoggedIn then
+  begin
+    DebugMsg('LoginPlayer -> Already logged in');
+    Exit;
+  end;
+
+  index := Login.PlayerIndex;
+
+  if Login.Players[index].User = '' then
+  begin
+    DebugMsg('LoginPlayer -> No player credentials. Add account to credentials to use the script.');
+    Exit;
+  end;
+
+  DebugMsg('LoginPlayer -> Temporarily setting world to 330');
+  originalWorlds := Login.Players[Login.PlayerIndex].Worlds;
+  Login.Players[Login.PlayerIndex].Worlds := [330];
+
+  attempts := 0;
+  repeat
+    Inc(attempts);
+    DebugMsg('LoginPlayer -> Attempting to login to world 330 (attempt #' + ToString(attempts) + ')');
+
+    Login.LoginPlayer(False);
+
+    if not GameClient.IsLoggedIn then
+    begin
+      retryTime := Random(5000, 10000);
+      DebugMsg('LoginPlayer -> Login failed or world 330 full. Retrying in about ' + ToStr(Round(retryTime / 1000)) + ' seconds...');
+      Wait(retryTime);
+    end;
+  until GameClient.IsLoggedIn;
+
+  DebugMsg('LoginPlayer -> Successfully logged in.');
+
+  DebugMsg('LoginPlayer -> Restoring original world list');
+  Login.Players[Login.PlayerIndex].Worlds := originalWorlds;
+end;
+
+procedure Wait(Milliseconds: UInt32); override;
+var
+  t: Double;
+begin
+  t := PerformanceTimer;
+  while (t + milliseconds) > PerformanceTimer do
+  begin end;
+end;
+
+procedure TScript.StartTimer(var Timer: TSimpleTimer; ms: Int64);
+begin
+  DebugMsg('StartTimer -> Initializing timer with ' + IntToStr(ms) + 'ms');
+  Timer.StartTime := GetTimeRunning();
+  Timer.Duration := ms;
+end;
+
+function TScript.TimerExpired(const Timer: TSimpleTimer): Boolean;
+begin
+  Result := (GetTimeRunning() - Timer.StartTime) >= Timer.Duration;
+  if Result then
+    DebugMsg('TimerExpired -> Timer has expired')
+  else
+    DebugMsg('TimerExpired -> Timer still active');
+end;
+
+function TCustomEdit.GetStringArray: TStringArray;
+var str, s: String;
+begin
+  DebugMsg('TCustomEdit.GetStringArray -> Extracting text from edit box');
+  try
+    str := Self.GetText();
+
+    for s in str.Split(',') do
+    begin
+      DebugMsg('TCustomEdit.GetStringArray -> Adding element: ' + s.trim());
+      Result += s.trim();
+    end;
+  except
+    DebugMsg('TCustomEdit.GetStringArray -> Exception occurred during parsing');
+  end;
+end;
+
+procedure TScript.DownloadToFile(const URL, Filename: string);
+var
+  Client: Int32;
+begin
+  DebugMsg('DownloadToFile -> Downloading assets from: ' + URL);
+  Client := InitializeHTTPClient(False);
+  try
+    GetHTTPPageEx(Client, URL, Filename);
+    DebugMsg('DownloadToFile -> Save complete: ' + Filename);
+  finally
+    DebugMsg('DownloadToFile -> Freeing HTTP client');
+    FreeHTTPClient(Client);
+  end;
+end;
+
+function TScript.GetExpectedXP(boneName: string): Int32;
+var
+  i: Integer;
+begin
+  DebugMsg('GetExpectedXP -> Looking up XP for bone: ' + boneName);
+  for i := 0 to High(ALLBONES) do
+  begin
+    if ALLBONES[i] = boneName then
+    begin
+      DebugMsg('GetExpectedXP -> Found ' + boneName + ', XP value: ' + IntToStr(BONE_XP[i]));
+      Exit(BONE_XP[i]);
+    end;
+  end;
+  DebugMsg('GetExpectedXP -> No bone match found, returning 0');
+  Result := 0;
+end;
+
+function TScript.EnsureZoom(mode, low, high: Integer; scroll: Boolean = True): Boolean;
+var
+  currentZoom, targetZoom: Integer;
+begin
+  DebugMsg('EnsureZoom -> Checking zoom level (Bounds: ' + IntToStr(low) + '-' + IntToStr(high) + ')');
+  currentZoom := MM2MS.GetZoomLevel();
+
+  if (currentZoom >= low) and (currentZoom <= high) then
+  begin
+    DebugMsg('EnsureZoom -> Current zoom (' + IntToStr(currentZoom) + ') is within bounds');
+    Exit(True);
+  end;
+
+  targetZoom := SRL.SkewedRand(mode, low, high);
+  DebugMsg('EnsureZoom -> Adjusting zoom to target: ' + IntToStr(targetZoom) + ' (Scroll: ' + ToStr(scroll) + ')');
+
+  if scroll then
+    Result := RSMouseZoom.SetZoomLevel(targetZoom)
+  else
+    Result := Options.SetZoomLevel(targetZoom);
+
+  DebugMsg('EnsureZoom -> Adjustment result: ' + ToStr(Result));
+end;
+
+procedure TScript.EnsureCompass(mode, low, high: Integer);
+var
+  currentCompass, targetAngle: Double;
+begin
+  DebugMsg('EnsureCompass -> Checking compass angle (Bounds: ' + IntToStr(low) + '-' + IntToStr(high) + ')');
+  currentCompass := Minimap.GetCompassAngle(True);
+
+  if (currentCompass >= low) and (currentCompass <= high) then
+  begin
+    DebugMsg('EnsureCompass -> Current angle (' + ToStr(currentCompass) + ') is acceptable');
+    Exit;
+  end;
+
+  targetAngle := SRL.SkewedRand(mode, low, high);
+  DebugMsg('EnsureCompass -> Setting compass to target angle: ' + ToStr(targetAngle));
+  Minimap.SetCompassAngle(targetAngle);
+end;
+
+function TScript.LowMinimapSimilarity(): Boolean;
+var
+  i: Integer;
+  largestSample: Double;
+begin
+  DebugMsg('LowMinimapSimilarity -> Sampling minimap similarity');
+  largestSample := 0;
+  for i := 0 to 2 do
+  begin
+    Map.Position;
+    largestSample := Max(largestSample, Map.Similarity);
+    DebugMsg('LowMinimapSimilarity -> Sample ' + IntToStr(i+1) + ': ' + ToStr(Map.Similarity));
+  end;
+
+  Result := largestSample < 0.65;
+  DebugMsg('LowMinimapSimilarity -> Final decision: ' + ToStr(Result) + ' (Best Sample: ' + ToStr(largestSample) + ')');
+end;
+
+function TChooseOption.SelectFast(
+  Text: TStringArray; MouseAction: Int32 = MOUSE_LEFT;
+  CaseSensitive: Boolean = True; CloseIfNotFound: Boolean = True
+): Boolean;
+var
+  Choice: TChooseOption_Option;
+  I, J, NumOptions: Int32;
+  B: TBox;
+  OptionText, TargetText: string;
+begin
+  DebugMsg('TChooseOption.SelectFast -> Searching for options: ' + ToStr(Text));
+  if not Self.Open() then
+  begin
+    DebugMsg('TChooseOption.SelectFast -> Interface is not open');
+    Exit;
+  end;
+
+  Wait(100, 500, wdLeft);
+
+  if (Bounds.Height() < 15) then
+  begin
+    DebugMsg('TChooseOption.SelectFast -> Invalid menu height');
+    Exit;
+  end;
+
+  NumOptions := Bounds.Height() div 15;
+  DebugMsg('TChooseOption.SelectFast -> Analyzing ' + IntToStr(NumOptions) + ' menu options');
+
+  for I := 0 to (NumOptions - 1) do
+  begin
+    B := [Bounds.X1, Bounds.Y1 + (I * 15), Bounds.X2, Bounds.Y1 + (I * 15) + 15];
+
+    if (B.Y2 > Bounds.Y2) then
+    begin
+      DebugMsg('TChooseOption.SelectFast -> Index ' + IntToStr(I) + ' out of menu bounds');
+      Exit;
+    end;
+
+    OptionText := OCR.RecognizeStatic(B, TOCRThresholdFilter.Create(-1), FONT_BOLD_12_SHADOW);
+    DebugMsg('TChooseOption.SelectFast -> Row ' + IntToStr(I) + ' text: ' + OptionText);
+    Choice.Text := OptionText;
+    Choice.Bounds := B;
+
+    for J := 0 to High(Text) do
+    begin
+      TargetText := Text[J];
+
+      if (CaseSensitive and (TargetText in OptionText)) or
+         (not CaseSensitive and (Lowercase(TargetText) in Lowercase(OptionText))) then
+      begin
+        DebugMsg('TChooseOption.SelectFast -> Match found: ' + TargetText);
+        Self.Select(Choice, MouseAction);
+        Exit(True);
+      end;
+    end;
+  end;
+
+  if CloseIfNotFound then
+  begin
+    DebugMsg('TChooseOption.SelectFast -> Option not found; closing menu');
+    WaitEx(500, 250);
+    Self.Close();
+  end;
+end;
+
+function TGameObject.SelectOptionFast(action: TStringArray; attempts: Int32 = 1): Boolean;
+begin
+  DebugMsg('TGameObject.SelectOptionFast -> Attempting action: ' + ToStr(action));
+  Self.ActionUpText := action;
+  Result := Self.Hover(attempts);
+
+  if Length(TWalkerObject.CurrentUpText) > 0 then
+  begin
+    DebugMsg('TGameObject.SelectOptionFast -> Clearing cached uptext');
+    TWalkerObject.CurrentUpText := [];
+  end;
+
+  if TWalkerObject.RedClicked then
+  begin
+    DebugMsg('TGameObject.SelectOptionFast -> Red click confirmed; skipping menu');
+    TWalkerObject.RedClicked := False;
+    Exit(True);
+  end;
+
+  DebugMsg('TGameObject.SelectOptionFast -> Calling SelectFast for menu selection');
+  Result := ChooseOption.SelectFast(action);
+end;
+
+procedure TRectangle.ScaleDownLeft(pixels: Integer);
+type
+  T4PTS = array[0..3] of TPoint;
+var
+  pts: T4PTS;
+  i, j: Integer;
+  angle: Double;
+  leftMostPointIdx, leftMostPointPartnerIdx: Integer;
+  longNeighborIdx, longNeighborPartnerIdx: Integer;
+  leftOfCount: Integer;
+
+  function distSq(a, b: TPoint): Integer;
+  begin
+    Result := Sqr(a.X - b.X) + Sqr(a.Y - b.Y);
+  end;
+
+  function pointOnLine(a, b: TPoint; pixels: Integer): TPoint;
+  var
+    angle: Double;
+  begin
+    if a.X = b.X then
+      angle := PI / 2
+    else
+      angle := ArcTan((a.Y - b.Y) / (a.X - b.X));
+
+    Result := [
+      a.X + Round(Cos(angle) * pixels),
+      a.Y + Round(Sin(angle) * pixels)
+    ];
+  end;
+begin
+  DebugMsg('TRectangle.ScaleDownLeft -> Rescaling rectangle by ' + IntToStr(pixels) + ' pixels');
+  pts := T4PTS(Self);
+
+  if pts[0].X = pts[1].X then
+    leftMostPointIdx := 0
+  else
+    for i := 0 to 3 do
+    begin
+      leftOfCount := 0;
+      for j := 0 to 3 do
+        if (i <> j) and (pts[i].X < pts[j].X) then
+          Inc(leftOfCount);
+      if leftOfCount = 3 then
+      begin
+        leftMostPointIdx := i;
+        Break;
+      end;
+    end;
+
+  longNeighborIdx := (leftMostPointIdx + 1) mod 4;
+  longNeighborPartnerIdx := (longNeighborIdx + 1) mod 4;
+  leftMostPointPartnerIdx := (leftMostPointIdx + 3) mod 4;
+
+  if distSq(pts[leftMostPointIdx], pts[longNeighborIdx]) <
+     distSq(pts[leftMostPointIdx], pts[(leftMostPointIdx + 3) mod 4]) then
+  begin
+    DebugMsg('TRectangle.ScaleDownLeft -> Adjusting indices for geometry');
+    longNeighborIdx := (leftMostPointIdx + 3) mod 4;
+    longNeighborPartnerIdx := (longNeighborIdx + 3) mod 4;
+    leftMostPointPartnerIdx := (leftMostPointIdx + 1) mod 4;
+  end;
+
+  pts[longNeighborIdx] := pointOnLine(pts[longNeighborIdx], pts[longNeighborPartnerIdx], pixels);
+  pts[leftMostPointIdx] := pointOnLine(pts[leftMostPointIdx], pts[leftMostPointPartnerIdx], pixels);
+
+  Self := TRectangle(pts);
+  DebugMsg('TRectangle.ScaleDownLeft -> Rescale complete');
+end;
+
+function TAdvertisementList.Contains(name: String): Boolean;
+var
+  i: Integer;
+begin
+  DebugMsg('TAdvertisementList.Contains -> Searching for: ' + name);
+  for i := 0 to High(Self) do
+  begin
+    if Self[i].Name = name then
+    begin
+      DebugMsg('TAdvertisementList.Contains -> Match found at index ' + IntToStr(i));
+      Exit(True);
+    end;
+  end;
+  DebugMsg('TAdvertisementList.Contains -> No match found');
+  Result := False;
+end;
+
+function TBadPohList.Contains(name: String): Boolean;
+var
+  i: Integer;
+begin
+  DebugMsg('TBadPohList.Contains -> Searching for: ' + name);
+  for i := 0 to High(Self) do
+  begin
+    if Self[i].Name = name then
+    begin
+      DebugMsg('TBadPohList.Contains -> Match found at index ' + IntToStr(i));
+      Exit(True);
+    end;
+  end;
+  DebugMsg('TBadPohList.Contains -> No match found');
+  Result := False;
+end;
+
+function TBadPohList.DeleteOld(maxAgeMs: Double; printMessage: Boolean = False): TStringArray;
+var
+  i: Integer;
+  curTime, age: Double;
+  newList: TBadPohList;
+begin
+  DebugMsg('TBadPohList.DeleteOld -> Checking for expired POHs');
+  curTime := PerformanceTimer();
+
+  for i := 0 to High(Self) do
+  begin
+    age := curTime - Self[i].Timestamp;
+
+    if age < maxAgeMs then
+    begin
+      DebugMsg('TBadPohList.DeleteOld -> Keeping POH: ' + Self[i].Name + ' (Age: ' + ToStr(Floor(age)) + 'ms)');
+      newList += Self[i];
+    end
+    else
+    begin
+      DebugMsg('TBadPohList.DeleteOld -> Expiring POH: ' + Self[i].Name);
+      Result += Self[i].Name;
+
+      if printMessage then
+        DebugMsg(
+          'TBadPohList.DeleteOld -> Removing POH ''' + Self[i].Name + ''' from bad list after ' + ToStr(Floor(age)) + 'ms'
+        );
+    end;
+  end;
+
+  Self := newList;
+end;
+
+function TNPC.Find(out atpa: T2DPointArray): Boolean; override;
+begin
+  DebugMsg('TNPC.Find -> Calling inherited Find');
+  Result := inherited;
+
+  if Length(atpa) > 0 then
+  begin
+    DebugMsg('TNPC.Find -> Processing ATPA results');
+    atpa := atpa.Biggest.Split(3);
+    atpa.SortBySize();
+  end
+  else
+    DebugMsg('TNPC.Find -> No ATPA results found');
+end;
+
+procedure TMouseZoom.MaxZoom(down: Boolean = True); override;
+var
+  scrolls: Int32;
+begin
+  DebugMsg('TMouseZoom.MaxZoom -> Adjusting zoom level (Down: ' + ToStr(down) + ')');
+  if down then
+    scrolls := Floor(Self.ZoomLevel / 26) + Random(6, 9)
+  else
+    scrolls := Floor((Self.MAX_ZOOM - Self.ZoomLevel) / 24) + Random(6, 9);
+
+  DebugMsg('TMouseZoom.MaxZoom -> Calculated scroll amount: ' + IntToStr(scrolls));
+  Self.Scroll(scrolls, down, True);
+end;
+
+procedure TScript.SetMouseSpeed();
+begin
+  DebugMsg('SetMouseSpeed -> Applying speed profile: ' + Self.ScriptSpeed);
+  case Self.ScriptSpeed of
+    'Normal': Mouse.Speed := Random(12, 15);
+    'Turbo' : Mouse.Speed := Random(19, 23);
+    'Chill' : Mouse.Speed := Random(6, 10);
+  end;
+  DebugMsg('SetMouseSpeed -> Current speed: ' + IntToStr(Mouse.Speed));
+end;
+
+procedure TMouse.Scroll(Amount: Int32; Down: Boolean); override;
+var
+  i, step, k, direction: Int32;
+  P: TPoint;
+begin
+  DebugMsg('TMouse.Scroll -> Scrolling ' + IntToStr(Amount) + ' steps (Down: ' + ToStr(Down) + ')');
+  P := Self.Position();
+  step := Round(SRL.GaussRand(12.0, 1.2));
+  direction := 1;
+  if not Down then
+    direction := -1;
+
+  k := 1;
+
+  for i := 1 to Amount do
+  begin
+    ScrollMouse(P.X, P.Y, direction);
+
+    if (k mod step = 0) then
+    begin
+      DebugMsg('TMouse.Scroll -> Intermediate pause reached at step ' + IntToStr(i));
+      step := Round(SRL.GaussRand(12.0, 1.2));
+      Wait(180, 315);
+      k := 0;
+    end
+    else
+      Wait(8, 16);
+
+    Inc(k);
+  end;
+  DebugMsg('TMouse.Scroll -> Completed scrolling');
+end;
+
+function TInventory.ContainsItem(item: TItem): Boolean; override;
+var
+  i: Int32;
+  tba, tmp: TBoxArray;
+  matches: TItemFinderMatch;
+  usedSlots: TIntegerArray;
+begin
+  DebugMsg('TInventory.ContainsItem -> Checking for item: ' + ToStr(item));
+
+  if (not Self.IsOpen()) and (not Self.Open()) then
+  begin
+    DebugMsg('TInventory.ContainsItem -> Failed to ensure inventory is open');
+    Exit(False);
+  end;
+
+  tba := Self.GetSlotBoxes();
+  usedSlots := [];
+
+  for i := 0 to High(tba) do
+  begin
+    if Self.IsSlotUsed(tba[i]) then
+    begin
+      tmp += tba[i];
+      usedSlots += i;
+    end;
+  end;
+
+  DebugMsg('TInventory.ContainsItem -> Occupied slots: ' + ToStr(usedSlots));
+
+  if (Length(tmp) = 0) then
+  begin
+    DebugMsg('TInventory.ContainsItem -> Inventory is empty');
+    Exit(False);
+  end;
+
+  DebugMsg('TInventory.ContainsItem -> Calling ItemFinder.Find...');
+  ItemFinder.Find([item], tmp, matches);
+
+  if (matches <> []) then
+  begin
+    DebugMsg('TInventory.ContainsItem -> SUCCESS: Item ' + ToStr(item) + ' found');
+    Exit(True);
+  end;
+
+  DebugMsg('TInventory.ContainsItem -> FAILURE: Item ' + ToStr(item) + ' not matched in any used slot');
+  Result := False;
+end;
+
+function TScript.SetSelectedSlotFast(itemName: String; slot: Int32; optionIndex: Integer; checkNull: Boolean = False): Boolean;
+var
+  selected: Int32;
+  secondOptionBounds: TBox;
+  from: TPoint;
+  customMouse: TMouse;
+  attempt: Integer;
+  foundUptext: Boolean;
+begin
+  DebugMsg('SetSelectedSlotFast -> Selecting item: ' + itemName + ' in slot: ' + IntToStr(slot));
+  selected := Inventory.GetSelectedSlot();
+
+  if selected = slot then
+  begin
+    DebugMsg('SetSelectedSlotFast -> Slot ' + IntToStr(slot) + ' is already selected');
+    Exit(True);
+  end;
+
+  if selected > -1 then
+  begin
+    DebugMsg('SetSelectedSlotFast -> Deselecting current slot: ' + IntToStr(selected));
+    if MainScreen.IsUpText('Use ' + itemName) then
+    begin
+      DebugMsg('SetSelectedSlotFast -> Correct item already selected (via uptext)');
+      Exit(True);
+    end;
+    Mouse.Click(Inventory.GetSlotBox(selected), MOUSE_LEFT);
+  end;
+
+  if slot > -1 then
+  begin
+    customMouse := Mouse;
+    customMouse.MissChance := 2;
+    customMouse.IdleInterval := 0;
+
+    if checkNull and MainScreen.IsUpText('null') then
+    begin
+      DebugMsg('SetSelectedSlotFast -> Uptext is "null", clicking to clear');
+      customMouse.Click(MOUSE_LEFT);
+      Wait(SRL.TruncatedGauss(60, 100));
+    end;
+
+    DebugMsg('SetSelectedSlotFast -> Moving to target slot');
+    customMouse.Move(Inventory.GetSlotBox(slot), True);
+
+    attempt := 0;
+    foundUptext := False;
+    while attempt < 5 do
+    begin
+      DebugMsg('SetSelectedSlotFast -> Uptext check attempt: ' + ToStr(attempt));
+      if MainScreen.IsUpText(['Bury', 'Bur', 'ury', 'Bu', 'ry']) or MainScreen.IsUpText(['Use']) then
+      begin
+        DebugMsg('SetSelectedSlotFast -> Found uptext: ' + Mainscreen.GetUpText);
+        foundUptext := True;
+        Break;
+      end;
+
+      DebugMsg('SetSelectedSlotFast -> Uptext mismatch, re-hovering');
+      Inventory.MouseSlot(notedBoneSlot);
+      Inc(attempt);
+      Wait(Random(100, 125));
+      customMouse.Move(Inventory.GetSlotBox(slot), True);
+
+      if not Inventory.ContainsItem(CurrentBone) then
+      begin
+        DebugMsg('SetSelectedSlotFast -> Critical error: Item lost during selection');
+        Exit(False);
+      end;
+    end;
+
+    if not foundUptext then
+    begin
+      DebugMsg('SetSelectedSlotFast -> Failed to find proper uptext (Bury/Use) after 5 attempts.');
+      Exit(False);
+    end;
+
+    if MainScreen.IsUpText(['Bury', 'Bur', 'ury', 'Bu', 'ry']) then
+    begin
+      DebugMsg('SetSelectedSlotFast -> Uptext is "Bury", handling via right-click to avoid burial');
+      if not ChooseOption.IsOpen() then
+      begin
+        customMouse.Click(MOUSE_RIGHT);
+        if not ChooseOption.IsOpen(Random(800, 1200), Random(30, 60)) then
+        begin
+          DebugMsg('SetSelectedSlotFast -> Failed to open context menu on bone: ' + itemName);
+          Exit(False);
+        end;
+      end;
+
+      Wait(SRL.TruncatedGauss(60, 100));
+      secondOptionBounds := [ChooseOption.Bounds.X1, ChooseOption.Bounds.Y1 + (15 * optionIndex),
+        ChooseOption.Bounds.X2, ChooseOption.Bounds.Y1 + (15 * optionIndex) + 15];
+      secondOptionBounds.Expand(-1);
+
+      from.X := secondOptionBounds.X1;
+      from.Y := secondOptionBounds.Y1 + (secondOptionBounds.Height div 3);
+
+      DebugMsg('SetSelectedSlotFast -> Clicking "Use" option in context menu');
+      customMouse.Move(SRL.RandomPointEx(from, secondOptionBounds));
+      customMouse.Click(MOUSE_LEFT);
+
+      Exit(True);
+    end;
+
+    DebugMsg('SetSelectedSlotFast -> Normal selection click');
+    customMouse.Click(MOUSE_LEFT);
+  end
+  else
+  begin
+    DebugMsg('SetSelectedSlotFast -> Invalid slot fallback; clicking selected');
+    Mouse.Click(Inventory.GetSlotBox(selected), MOUSE_LEFT);
+  end;
+
+  DebugMsg('SetSelectedSlotFast -> Final verification of selection');
+  Result := WaitUntil(Inventory.GetSelectedSlot() = slot, Random(40, 50), SRL.TruncatedGauss(500, 600));
+
+  if not Result then
+    DebugMsg('SetSelectedSlotFast -> Failed to select slot ' + ToString(slot) + ' for item: ' + itemName);
+end;
+
+function TScript.ChangeButtonState(Button: EChatButton; State: EChatButtonState): Boolean;
+begin
+  DebugMsg('ChangeButtonState -> Requested state: ' + ToStr(State));
+  if ChatButtons.GetState(Button) = State then
+  begin
+    DebugMsg('ChangeButtonState -> Button already in desired state');
+    Exit(True);
+  end;
+
+  DebugMsg('ChangeButtonState -> Right-clicking chat button');
+  ChatButtons.GetButton(Button).Click(MOUSE_RIGHT);
+
+  if WaitUntil(ChooseOption.IsOpen, 50, 1000) then
+  begin
+    DebugMsg('ChangeButtonState -> Selecting menu option for state');
+    case State of
+      EChatButtonState.ENABLED:   ChooseOption.Select(['Filter', 'standard', 'all']);
+      EChatButtonState.FILTERED:  ChooseOption.Select(['Filter', 'friends']);
+      EChatButtonState.DISABLED:  ChooseOption.Select(['none']);
+      EChatButtonState.HIDE:      ChooseOption.Select(['Hide']);
+      EChatButtonState.AUTOCHAT:  ChooseOption.Select(['autochat']);
+    end;
+  end;
+
+  Result := ChatButtons.GetState(Button) = State;
+  DebugMsg('ChangeButtonState -> Result: ' + ToStr(Result));
+end;
+
+function TScript.IsHouseOptionsOpen(): Boolean;
+var
+  text: String;
+begin
+  DebugMsg('IsHouseOptionsOpen -> Checking for interface header');
+  text := OCR.Recognize([585, 206, 697, 227], TOCRColorFilter.Create([$1F98FF], [5]),
+    FONT_BOLD_12);
+
+  Result := text = 'House Options';
+  DebugMsg('IsHouseOptionsOpen -> Header recognized as: ' + text + ' (Match: ' + ToStr(Result) + ')');
+end;
+
+function TScript.ReadAd(index: Integer): TAdvertisement;
+var
+  baseY: Integer := 81;
+  nameX: Integer := 35;
+  nameWidth: Integer := 100;
+  gildedX: Integer := 185;
+  gildedWidth: Integer := 25;
+  rowHeight: Integer := 25;
+  gilded: String;
+begin
+  DebugMsg('ReadAd -> Reading advertisement at index ' + IntToStr(index));
+  Result.Index := index;
+
+  Result.Name := OCR.Recognize([nameX, baseY + index * rowHeight, nameX + nameWidth, baseY + (index + 1) * rowHeight],
+    TOCRColorFilter.Create([$1F98FF], [5]), FONT_PLAIN_12);
+  DebugMsg('ReadAd -> Recognized Name: ' + Result.Name);
+
+  gilded := OCR.Recognize([gildedX, baseY + index * rowHeight, gildedX + gildedWidth, baseY + (index + 1) * rowHeight],
+    TOCRColorFilter.Create([$FFFFFF], [5]), FONT_PLAIN_12);
+  DebugMsg('ReadAd -> Recognized Gilded Status: ' + gilded);
+
+  if gilded = 'Y' then
+  begin
+    DebugMsg('ReadAd -> Gilded Altar confirmed for ' + Result.Name);
+    Result.GildedAltar := True;
+  end;
+end;
+
+function TScript.GetBoxEnterHouseAd(index: Integer): TBox;
+var
+  baseX: Integer := 434;
+  baseY: Integer := 81;
+  widthX: Integer := 27;
+  paddingY: Integer := 4;
+  rowHeight: Integer := 25;
+begin
+  DebugMsg('GetBoxEnterHouseAd -> Calculating box for index ' + IntToStr(index));
+  Result := [baseX, baseY + index * rowHeight + paddingY, baseX + widthX,
+    baseY + (index + 1) * rowHeight - paddingY];
+end;
+
+function TScript.Raycast(vectorX, vectorY: Double; box: TBox; min, max: Integer): Boolean;
+var
+  i, pixelStep: Integer;
+  x, y: Integer;
+begin
+  pixelStep := 5;
+  DebugMsg('Raycast -> Starting raycast check (Step: ' + IntToStr(pixelStep) + ')');
+
+  for i := 0 to ((max - min) div pixelStep) do
+  begin
+    x := Round(MainScreen.Center.X + vectorX * (min + i * pixelStep));
+    y := Round(MainScreen.Center.Y + vectorY * (min + i * pixelStep));
+
+    if box.Contains([x, y]) then
+    begin
+      DebugMsg('Raycast -> Intersection found at [' + IntToStr(x) + ', ' + IntToStr(y) + ']');
+      Exit(True);
+    end;
+  end;
+
+  DebugMsg('Raycast -> No intersection found');
+  Result := False;
+end;
+
+function TScript.BoxAroundPoint(point: TPoint; radius: Integer; shiftX, shiftY: Integer = 0): TBox;
+begin
+  DebugMsg('BoxAroundPoint -> Creating box at ' + ToStr(point) + ' with radius ' + IntToStr(radius));
+  Result := [point.X - radius + shiftX, point.Y - radius + shiftY,
+    point.X + radius + shiftX, point.Y + radius + shiftY];
+end;
+
+function TScript.FilterCandidates(
+  rayVectorX, rayVectorY, shiftVectorX, shiftVectorY: Double;
+  pixelShift: Integer;
+  primaryATPA: T2DPointArray;
+  minPixelsPrimary: Integer
+): TCandidateFilterResult;
+var
+  i: Integer;
+  candidateTPA: TPointArray;
+  box: TBox;
+  shiftX, shiftY: Integer;
+begin
+  DebugMsg('FilterCandidates -> Filtering ' + IntToStr(Length(primaryATPA)) + ' ATPA candidates');
+  shiftX := Round(shiftVectorX * pixelShift);
+  shiftY := Round(shiftVectorY * pixelShift);
+
+  for i := 0 to High(primaryATPA) do
+  begin
+    candidateTPA := primaryATPA[i];
+
+    if (minPixelsPrimary > 0) and (Length(candidateTPA) < minPixelsPrimary) then
+    begin
+      DebugMsg('FilterCandidates -> Candidate ' + IntToStr(i) + ' rejected: Too few pixels (' + IntToStr(Length(candidateTPA)) + ')');
+      Continue;
+    end;
+
+    box := BoxAroundPoint(candidateTPA.Mean, 15, shiftX, shiftY);
+
+    DebugMsg('FilterCandidates -> Raycasting candidate ' + IntToStr(i));
+    if Raycast(rayVectorX, rayVectorY, box, 70, 310) then
+    begin
+      DebugMsg('FilterCandidates -> Candidate ' + IntToStr(i) + ' passed raycast');
+      Result.FoundPrimary := True;
+
+      DebugATPA += [EdgeFromBox(box)];
+      DebugATPA += candidateTPA;
+      Result.ATPA += candidateTPA;
+    end
+    else
+      DebugMsg('FilterCandidates -> Candidate ' + IntToStr(i) + ' failed raycast');
+  end;
+end;
+
+function TScript.FindAltar(currentZoom: Integer; filterCardinalDirection: Boolean = True): TAltarSearchResult;
+var
+  zoom: Double;
+  compassAngleDegrees: Double;
+  vectorX, vectorY: Double;
+  pixelScaleFactor: Double;
+  pixelShift: Integer;
+  candidateAltarATPA: T2DPointArray;
+  altarFilterResult: TCandidateFilterResult;
+  attempts: Integer;
+begin
+  DebugMsg('FindAltar -> Initiating altar search (Zoom: ' + IntToStr(currentZoom) + ')');
+  attempts := 0;
+  Result.FoundAltar := False;
+
+  while (not Result.FoundAltar or not altarFilterResult.FoundPrimary) and (attempts < 4) do
+  begin
+    Inc(attempts);
+    DebugMsg('FindAltar -> Search attempt: ' + IntToStr(attempts));
+
+    zoom := currentZoom / 100.0;
+    pixelScaleFactor := Sqr(1.0 + zoom);
+    pixelShift := Round(15 * pixelScaleFactor);
+
+    compassAngleDegrees := Minimap.GetCompassAngle(False);
+    DebugMsg('FindAltar -> Compass Angle: ' + ToStr(compassAngleDegrees));
+
+    vectorX := Sin(compassAngleDegrees);
+    vectorY := -Cos(compassAngleDegrees);
+
+    candidateAltarATPA := MainScreen.FindObject(GildedAltar.Finder);
+    DebugMsg('FindAltar -> Objects found by color: ' + IntToStr(Length(candidateAltarATPA)));
+
+    if not filterCardinalDirection then
+    begin
+      DebugMsg('FindAltar -> Cardinal filtering disabled; returning best match');
+      if Length(candidateAltarATPA) > 0 then
+        Result.FoundAltar := True;
+
+      candidateAltarATPA.SortBySize();
+      Result.ATPA := candidateAltarATPA;
+      Exit;
+    end;
+
+    DebugMsg('FindAltar -> Checking candidates to the NORTH');
+    altarFilterResult := FilterCandidates(
+      vectorX, vectorY,
+      -vectorY, vectorX,
+      pixelShift, candidateAltarATPA, 40);
+
+    Result.FoundAltar := altarFilterResult.FoundPrimary;
+
+    if Length(altarFilterResult.ATPA) > 0 then
+    begin
+      DebugMsg('FindAltar -> Altar verified in NORTH direction');
+      Result := TAltarSearchResult([altarFilterResult.ATPA, ECardinalDirection.NORTH,
+        altarFilterResult.FoundPrimary ]);
+      Exit;
+    end;
+
+    DebugMsg('FindAltar -> Altar not found North; checking EAST');
+    altarFilterResult := FilterCandidates(
+      -vectorY, vectorX,
+      vectorX, vectorY,
+      0, candidateAltarATPA, 40);
+
+    Result.FoundAltar := Result.FoundAltar or altarFilterResult.FoundPrimary;
+
+    if Length(altarFilterResult.ATPA) > 0 then
+    begin
+      DebugMsg('FindAltar -> Altar verified in EAST direction');
+      Result := TAltarSearchResult([altarFilterResult.ATPA, ECardinalDirection.EAST,
+        altarFilterResult.FoundPrimary]);
+      Result.FoundAltar := True;
+      Exit;
+    end;
+
+    if (attempts < 4) then
+    begin
+      DebugMsg('FindAltar -> Attempt ' + IntToStr(attempts) + ' failed; rotating and zooming');
+      Wait(SRL.TruncatedGauss(1200, 2400));
+      EnsureZoom(5, 0, 10);
+      Antiban.RandomRotate;
+    end;
+  end;
+
+  if not Result.FoundAltar then
+    DebugMsg('FindAltar -> Final search attempt failed to locate altar');
+end;
+
+function TScript.FindPhials(): Boolean;
+begin
+  DebugMsg('FindPhials -> Starting search for Phials');
+  ClickedPool := False;
+
+  if not EnsureZoom(15, 10, 20) then
+  begin
+    DebugMsg('FindPhials -> Failed to set zoom');
+    Exit(False);
+  end;
+
+  if Phials.IsVisible() then
+  begin
+    DebugMsg('FindPhials -> Phials is already visible on screen');
+    Exit(True);
+  end;
+
+  DebugMsg('FindPhials -> Phials not visible; resetting zoom and compass');
+  EnsureZoom(15, 10, 20);
+  EnsureCompass(260, 230, 288);
+
+  if not Phials.IsVisible() and not Map.Position().InBox(PhialsLocation) then
+  begin
+    DebugMsg('FindPhials -> Not near General Store; walking to Phials coordinates');
+    Map.Walker.WalkBlind([7708, 37574], 10);
+  end;
+
+  Result := Phials.IsVisible();
+  DebugMsg('FindPhials -> Visibility result: ' + ToStr(Result));
+
+  if (not Result) and (Self.Attempts >= 2) then
+  begin
+    DebugMsg('FindPhials -> Multiple failed attempts; performing random rotation');
+    Antiban.RandomRotate();
+  end;
+
+  UsedPortal := False;
+end;
+
+function TScript.SelectNotedBones(): Boolean;
+begin
+  DebugMsg('SelectNotedBones -> Selecting noted bones in slot ' + IntToStr(Self.NotedBonesSlot));
+  Result := Inventory.SetSelectedSlot(Self.NotedBonesSlot);
+
+  if Result then
+    DebugMsg('SelectNotedBones -> Slot successfully selected')
+  else
+    DebugMsg('SelectNotedBones -> Failed to select slot');
+end;
+
+function TScript.UseNotedBonesOnPhials(): Boolean;
+var
+  ATPA: T2DPointArray;
+  i: Integer;
+  RIGHT_CLICK_TRIES: Integer = 1;
+begin
+  DebugMsg('UseNotedBonesOnPhials -> Attempting to use bones on Phials');
+
+  if not Phials.Find(ATPA) then
+  begin
+    DebugMsg('UseNotedBonesOnPhials -> Failed to locate Phials color/model');
+    Exit(False);
+  end;
+
+  for i := 0 to RIGHT_CLICK_TRIES do
+  begin
+    DebugMsg('UseNotedBonesOnPhials -> Right-clicking Phials, attempt: ' + IntToStr(i + 1));
+    Mouse.Click(ATPA[0].RandomValue(), MOUSE_RIGHT);
+
+    if not (ChooseOption.IsOpen() and ChooseOption.Select('Use ' + Self.GetBone + ' -> Phials')) then
+    begin
+      DebugMsg('UseNotedBonesOnPhials -> ChooseOption not found or select failed');
+      if i = RIGHT_CLICK_TRIES then
+      begin
+        DebugMsg('UseNotedBonesOnPhials -> Final attempt failed to select option: Use ' + Self.GetBone + ' -> Phials');
+
+        if Self.Attempts >= 2 then
+        begin
+          DebugMsg('UseNotedBonesOnPhials -> Triggering rotation antiban due to failures');
+          Antiban.RandomRotate();
+        end;
+
+        Exit(False);
+      end;
+    end
+    else
+    begin
+      DebugMsg('UseNotedBonesOnPhials -> Option successfully selected');
+      Break;
+    end;
+  end;
+
+  DebugMsg('UseNotedBonesOnPhials -> Waiting for movement flag to clear');
+  Minimap.WaitFlag();
+
+  DebugMsg('UseNotedBonesOnPhials -> Waiting for exchange chat interface (Color Check)');
+  Result := WaitUntil(SRL.CountColor(CTS0(128, 0), Chat.Bounds) > 0, 100, 15000);
+
+  if Result then
+    DebugMsg('UseNotedBonesOnPhials -> Color detected; chat interface confirmed')
+  else
+    DebugMsg('UseNotedBonesOnPhials -> Timeout: Failed to detect color in chat bounds');
+end;
+
+function TScript.HandlePhialsChat(): Boolean;
+var
+  initialBoneCount: Integer;
+begin
+  DebugMsg('HandlePhialsChat -> Handling exchange dialogue');
+
+  initialBoneCount := Inventory.CountItem(Self.GetBone);
+  DebugMsg('HandlePhialsChat -> Current unnoted bone count: ' + IntToStr(initialBoneCount));
+
+  DebugMsg('HandlePhialsChat -> Attempting to click "Exchange All"');
+  Result := Chat.ClickOption('Exchange All', True);
+
+  if not Result then
+  begin
+    DebugMsg('HandlePhialsChat -> ClickOption failed; falling back to Keyboard "1"');
+    Keyboard.PressKey(VK_1);
+  end;
+
+  Wait(SRL.TruncatedGauss(300, 600));
+
+  if AdvertBoard.IsVisible() then
+  begin
+    DebugMsg('HandlePhialsChat -> Hovering AdvertBoard to prep for next state');
+    AdvertBoard.Hover(1);
+  end;
+
+  DebugMsg('HandlePhialsChat -> Waiting for inventory bone count to increase');
+  Result := WaitUntil(
+    Inventory.CountItem(Self.GetBone) > initialBoneCount,
+    100,
+    Random(3000, 4000)
+  );
+
+  if Result then
+    DebugMsg('HandlePhialsChat -> Successfully exchanged bones')
+  else
+    DebugMsg('HandlePhialsChat -> Timeout: Bone count did not increase');
+end;
+
+function TScript.LeaveHouse(): Boolean;
+begin
+  DebugMsg('LeaveHouse -> Initiating POH exit');
+
+  if not IsHouseOptionsOpen then
+  begin
+    DebugMsg('LeaveHouse -> House options not open; checking main options');
+    if not Options.IsOpen then
+    begin
+      DebugMsg('LeaveHouse -> Opening game options');
+      if not Options.Open then
+      begin
+        DebugMsg('LeaveHouse -> Failed to open options');
+        Exit(False);
+      end;
+      Wait(SRL.TruncatedGauss(250, 650));
+    end;
+
+    if Options.GetCurrentTab <> EOptionsTab.CONTROLS then
+    begin
+      DebugMsg('LeaveHouse -> Navigating to Controls tab');
+      Options.OpenTab(EOptionsTab.CONTROLS);
+      if not WaitUntil(Options.GetCurrentTab = EOptionsTab.CONTROLS, SRL.TruncatedGauss(50, 100), 3000) then
+      begin
+        DebugMsg('LeaveHouse -> Failed to reach Controls tab');
+        Exit(False);
+      end;
+    end;
+
+    DebugMsg('LeaveHouse -> Clicking House settings button');
+    Options.GetButton(EOptionsButton.HOUSE).Click();
+    Wait(SRL.TruncatedGauss(250, 650));
+
+    if not WaitUntil(IsHouseOptionsOpen, SRL.TruncatedGauss(50, 100), 3000) then
+    begin
+      DebugMsg('LeaveHouse -> House options interface failed to appear');
+      Exit(False);
+    end;
+  end;
+
+  DebugMsg('LeaveHouse -> Clicking Leave House button');
+  Mouse.Click([563, 422, 720, 440], MOUSE_LEFT);
+  Result := WaitUntil(not IsHouseOptionsOpen, SRL.TruncatedGauss(50, 600), 5000);
+
+  if Result then
+    DebugMsg('LeaveHouse -> Successfully left house')
+  else
+    DebugMsg('LeaveHouse -> Failed to confirm house exit');
+
+  inPOH := false;
+end;
+
+function TScript.EnterHouse(): Boolean;
+begin
+  if SRL.Dice(27) and (not AdvertBoard.IsVisible()) then
+  begin
+    DebugMsg('EnterHouse -> Randomly walking towards AdvertBoard area');
+    Map.Walker.WalkBlind([7712, 37588], 12);
+  end;
+
+  DebugMsg('EnterHouse -> Entering last-visited POH');
+
+  if not AdvertBoard.SelectOption(['Visit-Last']) then
+  begin
+    DebugMsg('EnterHouse -> Failed to find Visit-Last option; rotating camera');
+    Antiban.RandomRotate();
+    Exit(False);
+  end;
+
+  DebugMsg('EnterHouse -> Waiting for POH loading screen');
+  if WaitUntil(MainScreen.LoadingPOH, 700, Random(15000, 20000)) then
+  begin
+    DebugMsg('EnterHouse -> Loading screen detected; waiting for completion');
+    Result := WaitUntil(not MainScreen.LoadingPOH, 700, Random(15000, 20000));
+
+    if Result then
+    begin
+      DebugMsg('EnterHouse -> Successfully entered house; waiting for stability');
+      Wait(SRL.TruncatedGauss(600, 1000));
+      inPOH := true;
+    end;
+  end
+  else
+  begin
+    DebugMsg('EnterHouse -> Adding ''' + Self.PohName + ''' to list of bad POHs (timeout)');
+    Self.BadPohs += [Self.PohName, PerformanceTimer()];
+    Self.PohName := '';
+  end;
+end;
+
+function TScript.CheckXPGain(attempt: Int32 = 0; allowClose: Boolean = True): Int32;
+var
+  elapsed: UInt64;
+  oldXP, xpDiff, expectedXP: Int32;
+  xpBox: TBox;
+begin
+  DebugMsg('CheckXPGain -> Reading current XP');
+  Result := XPBar.Read();
+  oldXP := Self.LastXPAmount;
+
+  if (Result = 0) and (Self.LastXPAmount > 0) then
+  begin
+    DebugMsg('CheckXPGain -> Failed to read XP bar; falling back to cached value: ' + ToStr(Self.LastXPAmount));
+    Result := Self.LastXPAmount;
+    Exit;
+  end;
+
+  if Self.WaitingForXP then
+  begin
+    DebugMsg('CheckXPGain -> Calculating XP difference since last offer');
+    xpDiff := Result - Self.LastXPCheck;
+    expectedXP := GetExpectedXP(Self.BoneType);
+
+    DebugMsg('CheckXPGain -> XP stats: Gained=' + ToStr(xpDiff) + ', Expected=' + ToStr(expectedXP) +
+             ', LastCheck=' + ToStr(Self.LastXPCheck) + ', Current=' + ToStr(Result));
+
+    if (xpDiff > 0) then
+    begin
+      DebugMsg('CheckXPGain -> XP drop detected');
+      if Self.GetLitBurner and (xpDiff < expectedXP) then
+      begin
+        DebugMsg('CheckXPGain -> XP gained (' + ToStr(xpDiff) + ') is lower than expected (' + ToStr(expectedXP) + ')');
+        Self.InBadPoh := True;
+        Self.WaitingForXP := False;
+        DebugMsg('CheckXPGain -> Adding ''' + Self.PohName + ''' to list of bad POHs, burners not lit');
+        Self.BadPohs += [Self.PohName, PerformanceTimer()];
+        Self.PohName := '';
+        Exit;
+      end;
+      Self.WaitingForXP := False;
+    end
+    else if TimerExpired(Self.LastOfferTimer) then
+    begin
+      DebugMsg('CheckXPGain -> No XP drop after 5s timeout');
+      Self.InBadPoh := True;
+      Self.WaitingForXP := False;
+      DebugMsg('CheckXPGain -> Adding ''' + Self.PohName + ''' to list of bad POHs, no XP received');
+      Self.BadPohs += [Self.PohName, PerformanceTimer()];
+      Self.PohName := '';
+      Exit;
+    end;
+  end;
+
+  if (Result > oldXP) then
+  begin
+    DebugMsg('CheckXPGain -> XP increase confirmed (' + ToStr(oldXP) + ' -> ' + ToStr(Result) + ')');
+    Self.LastXPTime := GetTickCount();
+    DebugMsg('CheckXPGain -> Updating LastXPTime: ' + ToStr(Self.LastXPTime));
+  end;
+
+  Self.LastXPAmount := Result;
+  DebugMsg('CheckXPGain -> Final result: ' + ToStr(Result));
+end;
+
+function TScript.UseBonesOnAltar(): Boolean;
+var
+  altarSearch: TAltarSearchResult;
+  slot, i: Integer;
+  altarTPA, bottomTPA: TPointArray;
+  altarBox, bottomBox: TBox;
+  chosenPoint: TPoint;
+begin
+  DebugMsg('UseBonesOnAltar -> Searching for altar');
+  altarSearch := FindAltar(MM2MS.GetZoomLevel);
+
+  if Length(altarSearch.ATPA) = 0 then
+  begin
+    if altarSearch.FoundAltar then
+      DebugMsg('UseBonesOnAltar -> Adding ''' + Self.PohName + ''' to list of bad POHs, no lit burner')
+    else
+      DebugMsg('UseBonesOnAltar -> Adding ''' + Self.PohName + ''' to list of bad POHs, failed to find altar');
+
+    Self.BadPohs += [Self.PohName, PerformanceTimer()];
+    Self.PohName := '';
+    Self.InBadPoh := True;
+    Exit(False);
+  end;
+
+  DebugMsg('UseBonesOnAltar -> Altar found, direction: ' + ToStr(altarSearch.Direction));
+  Self.AltarDirection := altarSearch.Direction;
+  altarTPA := altarSearch.ATPA.Biggest;
+
+  if not Inventory.FindItem(Self.GetBone, slot) then
+  begin
+    DebugMsg('UseBonesOnAltar -> Failed to find ' + Self.GetBone + ' in inventory');
+    Exit(False);
+  end;
+
+  DebugMsg('UseBonesOnAltar -> Selecting ' + Self.GetBone + ' in slot ' + IntToStr(slot));
+  if not SetSelectedSlotFast(Self.GetBone, slot, 1) then
+  begin
+    DebugMsg('UseBonesOnAltar -> Failed to select slot');
+    Exit(False);
+  end;
+
+  altarBox := altarTPA.Bounds();
+  altarBox.Y1 := altarBox.Y1 + (altarBox.Height div 2);
+  bottomTPA := altarTPA.FilterBox(altarBox);
+  if Length(bottomTPA) = 0 then
+    bottomTPA := altarTPA;
+
+  bottomBox := bottomTPA.Bounds();
+  chosenPoint := bottomTPA.RandomMean();
+
+  if Self.GetDebugMode then
+  begin
+    DebugMsg('UseBonesOnAltar -> Drawing debug graphics');
+    GameClient.Image.Clear();
+    GameClient.Image.DrawBox(altarTPA.Bounds, $00FF00);
+    GameClient.Image.DrawBox(bottomBox, $0000FF);
+    GameClient.Image.DrawTPA(bottomTPA, $FF00FF);
+    GameClient.Image.DrawCircle(chosenPoint, 3, $FFFF00);
+  end;
+
+  for i := 0 to 2 do
+  begin
+    DebugMsg('UseBonesOnAltar -> Attempting to move mouse to altar, try: ' + IntToStr(i + 1));
+    Mouse.Move(chosenPoint);
+    Wait(150, 250);
+
+    if MainScreen.IsUpText('Altar') then
+    begin
+      DebugMsg('UseBonesOnAltar -> Using ' + Self.GetBone + ' on altar');
+      Mouse.Click(MOUSE_RIGHT);
+      ChooseOption.Select('Use');
+      Wait(200, 400);
+
+      DebugMsg('UseBonesOnAltar -> Waiting for flag and setting states');
+      Minimap.WaitFlag();
+      Self.UsingAltar := True;
+      Self.InGoodPoh := True;
+      Wait(400, 600);
+      Exit(True);
+    end;
+
+    if i < 2 then
+      Wait(100, 200);
+  end;
+
+  DebugMsg('UseBonesOnAltar -> Failed to find uptext after attempts, rotating camera');
+  Antiban.RandomRotate();
+end;
+
+function TScript.OfferBones(): Boolean;
+var
+  altarSearch: TAltarSearchResult;
+  filteredAltarTPA: TPointArray;
+  filteredAltarRect: TRectangle;
+  boneSlots: TIntegerArray;
+  boneSlot: Integer;
+  i, j: Integer;
+  foundUpText: Boolean;
+  altarSearchIterations: Integer;
+  smallSleep: Integer;
+  customMouse: TMouse;
+  T: TCountDown;
+
+  function _findAltar(): Boolean;
+  var
+    rightHalfScreenBox: TBox;
+  begin
+    DebugMsg('OfferBones._findAltar -> Updating bone count and searching');
+    Inc(Self.BoneCount, Inventory.CountItem(Self.GetBone));
+    T.Init(15000);
+
+    altarSearch := FindAltar(MM2MS.GetZoomLevel, False);
+    if Length(altarSearch.ATPA) = 0 then
+    begin
+      DebugMsg('OfferBones._findAltar -> Altar not found, leaving house');
+      LeaveHouse();
+      Exit(False);
+    end;
+
+    DebugMsg('OfferBones._findAltar -> Filtering TPA on right half of screen');
+    rightHalfScreenBox := MainScreen.Bounds;
+    rightHalfScreenBox.X1 := rightHalfScreenBox.X1 + 78 +
+      (rightHalfScreenBox.X2 - rightHalfScreenBox.X1) div 2;
+
+    filteredAltarTPA := altarSearch.ATPA[0]
+      .Erode(2)
+      .FilterBox(rightHalfScreenBox);
+
+    filteredAltarRect := filteredAltarTPA.MinAreaRect();
+    filteredAltarRect.ScaleDownLeft(15);
+
+    if Self.GetDebugMode then
+    begin
+      DebugMsg('OfferBones._findAltar -> Drawing debug graphics');
+      DebugATPA := altarSearch.ATPA;
+      GameClient.Image.Clear();
+      GameClient.Image.DrawATPA(DebugATPA);
+      GameClient.Image.DrawBox(rightHalfScreenBox, $00FF00);
+      GameClient.Image.DrawTPA(filteredAltarTPA, $00FFFF);
+      GameClient.Image.DrawRect(filteredAltarRect, $0000FF);
+    end;
+
+    Exit(True);
+  end;
+
+begin
+  DebugMsg('OfferBones -> Setting Max Zoom and iterating search');
+  RSMouseZoom.MaxZoom(False);
+  altarSearchIterations := Random(3, 4);
+
+  case Self.AltarDirection of
+    ECardinalDirection.NORTH:
+    begin
+      DebugMsg('OfferBones -> Setting compass North');
+      EnsureCompass(183, 177, 188);
+    end;
+    ECardinalDirection.EAST:
+    begin
+      DebugMsg('OfferBones -> Setting compass East');
+      EnsureCompass(87, 83, 94);
+    end;
+  else
+    begin
+      DebugMsg('OfferBones -> Failed to set compass angle, invalid direction: ' + ToStr(Self.AltarDirection));
+      Exit(False);
+    end;
+  end;
+
+  customMouse := Mouse;
+  customMouse.MissChance := 2;
+  customMouse.IdleInterval := 0;
+
+  while Inventory.FindItem(Self.GetBone, boneSlots) do
+  begin
+    if (altarSearchIterations > 0) then
+    begin
+      DebugMsg('OfferBones -> Calling internal _findAltar');
+      if not _findAltar() then
+        Exit(False);
+    end;
+    Dec(altarSearchIterations);
+
+    boneSlots.Sort();
+    boneSlot := High(boneSlots);
+
+    if Length(boneSlots) >= 2 then
+      boneSlot := SRL.SkewedRand((High(boneSlots) + 1) div 2, Min(1, Length(boneSlots) - 2),
+        High(boneSlots));
+
+    DebugMsg('OfferBones -> Selecting bone in slot ' + IntToStr(boneSlots[boneSlot]));
+    if SetSelectedSlotFast(Self.GetBone, boneSlots[boneSlot], 1, Length(boneSlots) <= 2) then
+    begin
+      foundUpText := False;
+
+      if InBadPOH then
+      begin
+        DebugMsg('OfferBones -> Currently in bad POH, exiting');
+        Exit(False);
+      end;
+
+      for j := 0 to 1 do
+      begin
+        DebugMsg('OfferBones -> Moving mouse to altar rectangle, attempt: ' + IntToStr(j + 1));
+        customMouse.Move(SRL.Rowp(customMouse.Position(), filteredAltarRect));
+        if MainScreen.IsUpText('Altar') then
+        begin
+          foundUpText := True;
+          Wait(SRL.TruncatedGauss(10, 100));
+          DebugMsg('OfferBones -> Clicking altar to offer bone');
+          customMouse.Click(MOUSE_LEFT);
+
+          StartTimer(Self.LastOfferTimer, 5000);
+          SetMouseSpeed();
+          CheckXPGain;
+          Self.LastXPCheck := XPBar.Read();
+          Self.WaitingForXP := True;
+
+          if Length(boneSlots) <= SRL.TruncatedGauss(2, 3) then
+          begin
+            DebugMsg('OfferBones -> Few bones left, waiting for completion');
+            Wait(15, 50);
+            EnsureZoom(14, 8, 26);
+
+            WaitUntil(
+              not Inventory.ContainsItem(Self.GetBone),
+              100,
+              Random(100 + 1000 * (Length(boneSlots) - 1),
+                200 + 1500 * (Length(boneSlots) - 1)));
+            Exit(True);
+          end;
+
+          Break;
+        end;
+      end;
+
+      if not foundUpText then
+      begin
+        DebugMsg('OfferBones -> Couldn''t find up text when using bones on altar');
+        Exit(False);
+      end;
+
+      if SRL.Dice(1) then
+      begin
+        smallSleep := SRL.TruncatedGauss(2000, 3500);
+        DebugMsg('OfferBones -> Taking a small break for ' + ToStr(smallSleep) + 'ms');
+        Wait(smallSleep);
+      end;
+    end;
+  end;
+
+  DebugMsg('OfferBones -> No more bones found in inventory');
+  Exit(True);
+end;
+
+function TScript.EnterHouseFromAd(): Boolean;
+var
+  i: Integer;
+  ad: TAdvertisement;
+  ads: TAdvertisementList;
+  adsFromTop: TAdvertisementList;
+  adsFromBottom: TAdvertisementList;
+  numBadPohs: Integer;
+  foundPreferred: Boolean;
+  clickPlayerNames: Boolean;
+
+  function _readAllAds(stopAt: TAdvertisementList = []): TAdvertisementList;
+  var
+    j: Integer;
+    foundBlacklisted: Boolean;
+    blacklistHits: TStringArray;
+    allAdNames: TStringArray;
+  begin
+    DebugMsg('EnterHouseFromAd._readAllAds -> Entering POH from advertisement');
+    foundBlacklisted := False;
+    SetLength(blacklistHits, 0);
+    SetLength(allAdNames, 0);
+
+    for j := 0 to 10 do
+    begin
+      ad := ReadAd(j);
+
+      if ad.Name = '' then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Ad at index ' + IntToStr(j) + ' is empty, skipping');
+        Continue;
+      end;
+
+      allAdNames += [ad.Name];
+
+      if stopAt.Contains(ad.Name) then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Found stopAt name: ' + ad.Name + '; terminating read');
+        Exit;
+      end;
+
+      if Self.POHBlacklist.Contains(ad.Name) then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Skipping blacklisted POH: ' + ad.Name);
+        foundBlacklisted := True;
+        blacklistHits += [ad.Name];
+        Continue;
+      end;
+
+      if Self.BadPohs.Contains(ad.Name) then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Skipping bad POH (recent failure): ' + ad.Name);
+        Inc(numBadPohs);
+        Continue;
+      end;
+
+      if not ad.GildedAltar then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Skipping ' + ad.Name + ' (No Gilded Altar)');
+        Continue;
+      end;
+
+      if Self.POHPlayer.Contains(ad.Name) then
+      begin
+        DebugMsg('EnterHouseFromAd._readAllAds -> Preferred player found: ' + ad.Name);
+        foundPreferred := True;
+      end;
+
+      Result += ad;
+    end;
+
+    if DEBUGMODE then
+    begin
+      DebugMsg('EnterHouseFromAd._readAllAds -> All POHs seen in ad list: ' + ToStr(allAdNames));
+      if foundBlacklisted then
+        DebugMsg('EnterHouseFromAd._readAllAds -> Blacklisted POHs skipped: ' + ToStr(blacklistHits))
+      else
+        DebugMsg('EnterHouseFromAd._readAllAds -> No blacklisted POHs found in ad list.');
+    end;
+  end;
+
+  function _tryEnterPoh(ad: TAdvertisement): Boolean;
+  var
+    enterHouseBox: TBox;
+  begin
+    if Self.POHBlacklist.Contains(ad.Name) then
+    begin
+      DebugMsg('EnterHouseFromAd._tryEnterPoh -> Attempted to enter blacklisted POH (blocked): ' + ad.Name);
+      Exit(False);
+    end;
+
+    if not GameInterface.IsOpen(EInterfaceType.CLASSIC) then
+    begin
+      DebugMsg('EnterHouseFromAd._tryEnterPoh -> Interface closed, cannot enter');
+      Exit(False);
+    end;
+
+    DebugMsg('EnterHouseFromAd._tryEnterPoh -> Attempting entry for: ' + ad.Name);
+    enterHouseBox := GetBoxEnterHouseAd(ad.Index);
+    Mouse.Click(enterHouseBox, MOUSE_LEFT);
+
+    if WaitUntil(MainScreen.LoadingPOH, 100, Random(2000, 4000)) then
+    begin
+      DebugMsg('EnterHouseFromAd._tryEnterPoh -> Loading screen detected for: ' + ad.Name);
+      Result := WaitUntil(not MainScreen.LoadingPOH, 100, Random(5000, 8000));
+
+      if Result then
+      begin
+        DebugMsg('EnterHouseFromAd._tryEnterPoh -> Successfully entered ' + ad.Name);
+        Self.PohName := ad.Name;
+      end;
+    end
+    else
+    begin
+      DebugMsg('EnterHouseFromAd._tryEnterPoh -> Adding ''' + ad.Name + ''' to list of bad POHs, couldn''t enter');
+      Self.BadPohs += [ad.Name, PerformanceTimer()];
+      Inc(numBadPohs);
+    end;
+  end;
+
+begin
+  DebugMsg('EnterHouseFromAd -> Scanning advertisements from top');
+  adsFromTop := _readAllAds();
+
+  if (Length(Self.POHPlayer) > 0) and (not foundPreferred) and
+     (SRL.CountColor(HouseAdvertisementScrollBg, HouseAdvertisementScrollBox) > 15) then
+  begin
+    DebugMsg('EnterHouseFromAd -> Preferred player not visible; scrolling to bottom');
+    Wait(1200, 1500);
+    Mouse.Click(HouseAdvertisementPlayerNameBox, MOUSE_LEFT);
+    Wait(100, 200);
+    Mouse.Move(MainScreen.Center.Random(50, 50));
+    Wait(800, 1200);
+    adsFromBottom := _readAllAds(adsFromTop);
+    clickPlayerNames := True;
+  end;
+
+  DebugMsg('EnterHouseFromAd -> Iterating through detected advertisements');
+  for ads in [adsFromBottom, adsFromTop] do
+  begin
+    DebugMsg('EnterHouseFromAd -> Attempting entry for preferred players');
+    for i := 0 to High(ads) do
+      if Self.POHPlayer.Contains(ads[i].Name) and _tryEnterPoh(ads[i]) then
+        Exit(True);
+
+    DebugMsg('EnterHouseFromAd -> Attempting entry for non-preferred players');
+    for i := 0 to High(ads) do
+      if not Self.POHPlayer.Contains(ads[i].Name) and _tryEnterPoh(ads[i]) then
+        Exit(True);
+
+    if clickPlayerNames then
+    begin
+      DebugMsg('EnterHouseFromAd -> Clicking player names to reset view');
+      Mouse.Click(HouseAdvertisementPlayerNameBox, MOUSE_LEFT);
+      Wait(1600, 2800);
+    end;
+  end;
+
+  if numBadPohs >= (Length(adsFromTop) + Length(adsFromBottom)) then
+  begin
+    DebugMsg('EnterHouseFromAd -> Error: All available POHs are marked as bad or invalid');
+    TerminateScript('Couldn''t find any valid POHs');
+  end;
+end;
+
+function TScript.OpenHouseAds(): Boolean;
+begin
+  DebugMsg('OpenHouseAds -> Ensuring zoom for interaction');
+  EnsureZoom(18, 15, 20);
+  DebugMsg('OpenHouseAds -> Opening POH advertisements');
+
+  if not AdvertBoard.Click() then
+  begin
+    DebugMsg('OpenHouseAds -> Failed to click AdvertBoard');
+    Exit(False);
+  end;
+
+  DebugMsg('OpenHouseAds -> Waiting for House Ad interface to open');
+  Result := WaitUntil(GameInterface.IsOpen(EInterfaceType.CLASSIC), 100, Random(8000, 10000));
+
+  if Result then
+    DebugMsg('OpenHouseAds -> Interface opened successfully')
+  else
+    DebugMsg('OpenHouseAds -> Timed out waiting for interface');
+end;
+
+function TScript.UseOrnatePool(): Boolean;
+begin
+  DebugMsg('UseOrnatePool -> Using pool to restore run energy');
+
+  DebugMsg('UseOrnatePool -> Attempting to click Ornate Pool');
+  OrnatePool.Click();
+  ClickedPool := True;
+
+  DebugMsg('UseOrnatePool -> Waiting for movement to initiate');
+  Wait(2000);
+
+  while Minimap.IsPlayerMoving do
+  begin
+    DebugMsg('UseOrnatePool -> Player is still moving towards the pool...');
+    Wait(1000);
+  end;
+
+  DebugMsg('UseOrnatePool -> Movement finished');
+  Result := True;
+end;
+
+function TScript.GetLibraryVersion(LibraryName: String): String;
+var
+  ChangelogPath: String;
+  FileHandle: Integer;
+  Line: String;
+  VersionStart, VersionEnd: Integer;
+begin
+  DebugMsg('GetLibraryVersion -> Searching for version of: ' + LibraryName);
+  Result := 'Unknown';
+  ChangelogPath := IncludePath + LibraryName + '/CHANGELOG.md';
+
+  if not FileExists(ChangelogPath) then
+  begin
+    DebugMsg('GetLibraryVersion -> File not found: ' + ChangelogPath);
+    Exit;
+  end;
+
+  DebugMsg('GetLibraryVersion -> Opening file: ' + ChangelogPath);
+  FileHandle := OpenFile(ChangelogPath, False);
+  if FileHandle = -1 then
+  begin
+    DebugMsg('GetLibraryVersion -> Failed to open file handle');
+    Exit;
+  end;
+
+  try
+    DebugMsg('GetLibraryVersion -> Reading file string');
+    if ReadFileString(FileHandle, Line, 100) then
+    begin
+      VersionStart := Pos('## [', Line);
+      if VersionStart > 0 then
+      begin
+        VersionStart := VersionStart + 4;
+        VersionEnd := Pos(']', Line);
+        if VersionEnd > VersionStart then
+        begin
+          Result := Copy(Line, VersionStart, VersionEnd - VersionStart);
+          DebugMsg('GetLibraryVersion -> Version found: ' + Result);
+        end
+        else
+          DebugMsg('GetLibraryVersion -> Closing bracket not found in line');
+      end
+      else
+        DebugMsg('GetLibraryVersion -> Version header (## [) not found in line');
+    end
+    else
+      DebugMsg('GetLibraryVersion -> Failed to read line from file');
+  finally
+    DebugMsg('GetLibraryVersion -> Closing file handle');
+    CloseFile(FileHandle);
+  end;
+end;
+
+function TScript.ProgReport(ResultType: Int32; ScriptName, ScriptAuthor, ScriptVersion: String;
+                    VarNames: TStringArray; VarValues: TVariantArray): Variant;
+var
+  TSA: TStringArray;
+  s, s2, s3, s4: String;
+  i, i2, L: Int32;
+begin
+  s3 := '=';
+  s4 := ' ';
+
+  if ResultType = 2 then
+    Result := '';
+
+  if Length(VarNames) <> Length(VarValues) then
+  begin
+    DebugMsg('ProgReport -> VarNames and VarValues must be the same length');
+    Exit;
+  end;
+
+  SetLength(TSA, 3 + Length(VarNames) + 2);
+  s2 := 'by ' + ScriptAuthor;
+
+  TSA[0] := s3;
+  TSA[1] := ScriptName.Capitalize + ' ' + ScriptVersion;
+  TSA[2] := s2;
+  TSA[3] := s3;
+
+  i2 := 3 + Length(VarNames);
+
+  for i := 4 to i2 do
+    L := Max(L, Length(VarNames[i - 4]));
+
+  for i := 4 to i2 do
+  begin
+    s := VarValues[i - 4];
+    if (Length(s) > 1) and (s[1] = 'v') and (s[2] in ['0'..'9']) then
+      TSA[i] := Padr(VarNames[i - 4].Capitalize, L) + ' : ' + s
+    else
+      TSA[i] := Padr(VarNames[i - 4].Capitalize, L) + ' : ' + s.Capitalize;
+  end;
+
+  TSA[i2 + 1] := s3;
+
+  i2 := 0;
+  for i := 0 to High(TSA) do
+    i2 := Max(i2, Length(TSA[i]));
+
+  TSA[0] := s3.Replicate(i2);
+  TSA[3] := s3.Replicate(i2);
+  TSA[High(TSA)] := s3.Replicate(i2);
+
+  TSA[2] := s4.Replicate(Round((i2 - Length(TSA[2])) / 2)) + TSA[2];
+
+  for i := 0 to High(TSA) do
+  begin
+    if TSA[i][1] = s3 then
+      s := '[=' + Padr(TSA[i], i2) + '=]'
+    else
+      s := '[ ' + Padr(TSA[i], i2) + ' ]';
+
+    case ResultType of
+      0, 1: DebugMsg(s);
+      2:    Result := Result + s + Chr(13);
+    else
+      begin
+        DebugMsg('Invalid Result Type');
+        Exit;
+      end;
+    end;
+
+  end;
+
+  if ResultType <> 2 then
+    Result := True;
+end;
+
+procedure TScript.Report();
+var
+  XpGained, BonesUsed, BonesPerHour: Int32;
+  RunTime: Int64;
+  SArr: TStringArray;
+  VArr: TVariantArray;
+begin
+  XPBar.EarnedXP();
+  XpGained := XPBar.Read() - Self.StartXP;
+  RunTime  := Self.TrueRunTime.ElapsedTime();
+
+  BonesUsed := Self.StartingBones - Inventory.CountItemStack(Self.CurrentBone);
+
+  if RunTime > 0 then
+    BonesPerHour := Round(BonesUsed / (RunTime / 1000 / 60 / 60))
+  else
+    BonesPerHour := 0;
+
+  SArr := ['Runtime', 'Bones type', 'XP gained', 'Bones/hr'];
+  VArr := [SRL.MsToTime(GetTimeRunning, Time_Short), Self.GetBone, ToStr(Round(XpGained, 2),
+           '(', Round(XpGained / (RunTime / 1000 / 60 / 60)), '/hr)'), ToStr(BonesPerHour)];
+
+  if Self.TakeBreaks then
+  begin
+    SArr += 'Until break';
+    VArr += Antiban.TimeUntilBreak(Antiban.Breaks[0]);
+  end;
+
+  if Self.TakeSleeps then
+  begin
+    SArr += 'Until sleep';
+    VArr += SRL.MsToTime(Max(0, Round(Antiban.Sleeps[0].NextAtTime - GetTimeRunning)), TIME_BARE);
+  end;
+
+  SArr += ['SRL-T', 'WaspLib'];
+  VArr += ['v' + Self.SRLTVersion, 'v' + Self.WaspLibVersion];
+
+  if WaspClient.HasAccess({$MACRO SCRIPT_ID}, {$MACRO SCRIPT_REVISION}) then
+    ProgReport(1, 'Gilded Altar Offerer', 'Baconadors', VERSION, SArr, VArr)
+  else
+    ProgReport(1, 'Gilded Altar Offerer', 'Baconadors.', VERSION, SArr, VArr)
+end;
+
+procedure TScript.BreakPause(Task: PBreakTask);
+begin
+  Self.TrueRuntime.Pause();
+end;
+
+procedure TScript.BreakResume(Task: PBreakTask);
+begin
+  Self.TrueRuntime.Resume();
+  Self.PohName := '';
+end;
+
+procedure TScript.SleepPause(Task: PSleepTask);
+begin
+  Self.TrueRunTime.Pause();
+end;
+
+procedure TScript.SleepResume(Task: PSleepTask);
+begin
+  if GetTimeRunning() > Self.ShutdownTime then
+    TerminateScript('Time to shutdown');
+
+  Self.TrueRunTime.Resume();
+end;
+
+procedure TScript.PrintContinuedWarnings();
+begin
+  if not (Self.ContinuedWithWaspWarning or Self.ContinuedWithFixedWarning or Self.ContinuedWithSubWarning) then
+    Exit;
+
+  DebugMsg('');
+  DebugMsg('===========================================');
+  DebugMsg('  Script ran with the following problems:  ');
+  DebugMsg('===========================================');
+
+  if Self.ContinuedWithWaspWarning then
+    DebugMsg('- Not running via Wasp Launcher');
+
+  if Self.ContinuedWithFixedWarning then
+    DebugMsg('- Not using FIXED CLASSIC screen mode');
+
+  if Self.ContinuedWithSubWarning then
+    DebugMsg('- Subscription could not be verified');
+
+  if GUI.gpuPluginActive then
+    DebugMsg('- GPU plugin is ACTIVE');
+
+  DebugMsg('===========================================');
+end;
+
+procedure TScript.SubmitMyStats();
+begin
+  XPBar.Read();
+
+  APICLient.UpdatePayload(0, 0, 0);
+  if APIClient.Timer.IsFinished then
+    begin
+      APIClient.SubmitStats(APIClient.GetUUID);
+      DebugMsg('SubmitMyStats -> Submitted stats.');
+    end;
+end;
+
+procedure TScript.SetupAntiban();
+begin
+  Antiban.Skills += ESKILL.PRAYER;
+
+  Antiban.AddTask(ONE_MINUTE * 3,  @Mouse.RandomMovement);
+  Antiban.AddTask(ONE_MINUTE * 4,  @Antiban.LoseFocus);
+  Antiban.AddTask(ONE_MINUTE * 7,  @Antiban.RandomRotate);
+  Antiban.AddTask(ONE_MINUTE * 15, @Antiban.HoverSkills);
+
+  Antiban.OnStartBreak  := @BreakPause;
+  Antiban.OnFinishBreak := @BreakResume;
+end;
+
+procedure Tscript.SafeFree(var Obj);
+begin
+  try
+    if Assigned(TObject(Obj)) then
+    begin
+      TObject(Obj).Free;
+      Pointer(Obj) := nil;
+    end;
+  except
+    DebugMsg('SafeFree -> SafeFree failed');
+  end;
+end;
+
+procedure TScript.EndScript();
+begin
+  try
+    try
+      DebugMsg('EndScript -> Clearing GameClient image');
+      GameClient.Image.Clear;
+      DebugMsg('EndScript -> GameClient image cleared');
+    except
+      DebugMsg('EndScript -> Failed to clear GameClient image');
+    end;
+
+    try
+      DebugMsg('EndScript -> Generating final report');
+      Self.Report();
+      DebugMsg('EndScript -> Report generated');
+    except
+      DebugMsg('EndScript -> Failed to generate report');
+    end;
+
+    try
+      DebugMsg('EndScript -> Printing continued warnings');
+      Self.PrintContinuedWarnings();
+      DebugMsg('EndScript -> Printed continued warnings');
+    except
+      DebugMsg('EndScript -> Failed to print continued warnings');
+    end;
+
+    try
+    begin
+      DebugMsg('EndScript -> Submitting stats to website...');
+    end;
+    except
+      DebugMsg('EndScript -> Failed to submit stats.');
+    end;
+
+    try
+    begin
+      DebugMsg('EndScript -> Thanks for using Baconadors'' Gilded Altar Offerer!');
+      DebugMsg('EndScript -> Calling TerminateScript');
+      TerminateScript();
+    end;
+    except
+      DebugMsg('EndScript -> Failed to send goodbye message');
+    end;
+
+    try
+      DebugMsg('EndScript -> Freeing bitmap resources');
+      SafeFree(ImgSettings);
+      SafeFree(ImgAccounts);
+      SafeFree(warnImg);
+      SafeFree(warnTriangle140);
+      DebugMsg('EndScript -> Bitmap resources freed');
+    except
+      DebugMsg('EndScript -> Failed to free a bmp');
+    end;
+
+  except
+    DebugMsg('EndScript -> EndScript exception');
+  end;
+end;
+
+procedure TScript.CheckDisplaySettings();
+begin
+  DebugMsg('CheckDisplaySettings -> Checking Display settings...');
+
+  if Options.OpenTab(EOptionsTab.DISPLAY) then
+  begin
+    DebugMsg('CheckDisplaySettings -> Display tab opened');
+    if Options.GetBrightness() < 100 then
+    begin
+      DebugMsg('CheckDisplaySettings -> Brightness low; setting max brightness');
+      Options.SetMaxBrightness();
+    end
+    else
+      DebugMsg('CheckDisplaySettings -> Brightness is already at maximum');
+  end
+  else
+    DebugMsg('CheckDisplaySettings -> Failed to open display tab');
+end;
+
+function TScript.PercentRed(): Integer;
+var
+  count, total: Int32;
+begin
+  DebugMsg('PercentRed -> Calculating red pixel percentage on minimap');
+  count := SRL.CountColor(CTS2(238, 2, 0.01, 0.01), Minimap.Bounds);
+  total := Round(Pi * 73 * 73);
+
+  if (total = 0) then
+  begin
+    DebugMsg('PercentRed -> Total area is 0; exiting');
+    Exit(0);
+  end;
+
+  Result := Ceil((count * 100) / total);
+  DebugMsg('PercentRed -> Result: ' + IntToStr(Result) + '%');
+end;
+
+procedure TScript.CheckVersions();
+var
+  SRLTVersionInt, MinSRLTInt, WaspLibVersionInt, MinWaspLibInt: Int32;
+  SRLTParts, MinSRLTParts, WaspParts, MinWaspParts: TStringArray;
+  HasError: Boolean;
+begin
+  SRLTParts := Self.SRLTVersion.Split('.');
+  MinSRLTParts := Self.MinSRLT.Split('.');
+  WaspParts := Self.WaspLibVersion.Split('.');
+  MinWaspParts := Self.MinWaspLib.Split('.');
+
+  SRLTVersionInt := (StrToIntDef(SRLTParts[0], 0) * 10000) + (StrToIntDef(SRLTParts[1], 0) * 100) + StrToIntDef(SRLTParts[2], 0);
+  MinSRLTInt := (StrToIntDef(MinSRLTParts[0], 0) * 10000) + (StrToIntDef(MinSRLTParts[1], 0) * 100) + StrToIntDef(MinSRLTParts[2], 0);
+  WaspLibVersionInt := (StrToIntDef(WaspParts[0], 0) * 10000) + (StrToIntDef(WaspParts[1], 0) * 100) + StrToIntDef(WaspParts[2], 0);
+  MinWaspLibInt := (StrToIntDef(MinWaspParts[0], 0) * 10000) + (StrToIntDef(MinWaspParts[1], 0) * 100) + StrToIntDef(MinWaspParts[2], 0);
+
+  HasError := False;
+
+  if (SRLTVersionInt < MinSRLTInt) or (WaspLibVersionInt < MinWaspLibInt) then
+  begin
+    DebugMsg('');
+    DebugMsg('===============================================================');
+    DebugMsg('                ERROR: Library version mismatch                ');
+    DebugMsg('===============================================================');
+
+    if SRLTVersionInt < MinSRLTInt then
+    begin
+      DebugMsg('SRL-T version too old. Current: ' + Self.SRLTVersion + ' | Required: ' + Self.MinSRLT);
+      HasError := True;
+    end;
+
+    if WaspLibVersionInt < MinWaspLibInt then
+    begin
+      DebugMsg('WaspLib version too old. Current: ' + Self.WaspLibVersion + ' | Required: ' + Self.MinWaspLib);
+      HasError := True;
+    end;
+
+    DebugMsg('          Please update your libraries and try again.          ');
+    DebugMsg('===============================================================');
+    DebugMsg('');
+    TerminateScript();
+  end;
+
+  DebugMsg('Version check passed - SRL-T: ' + Self.SRLTVersion + ' | WaspLib: ' + Self.WaspLibVersion);
+end;
+
+procedure TScript.Init();
+var
+  i: Int32;
+  actualItems: TItemArray;
+  tpa: TPointArray;
+begin
+  DebugMsg('Init -> Logging in player');
+  Self.LoginPlayer;
+
+  Self.LastReportTime := GetSystemTime();
+  DebugMsg('Init -> Configuring mouse and display settings');
+  SetMouseSpeed();
+  SettingsHandler.CheckDisplaySettings();
+
+  DebugMsg('Init -> Checking library versions');
+  Self.SRLTVersion := GetLibraryVersion('SRL-T');
+  Self.WaspLibVersion := GetLibraryVersion('WaspLib');
+  Self.MinSRLT := '0.1.1';
+  Self.MinWaspLib := '0.1.1';
+  Self.CheckVersions();
+
+  MinRunEnergy := Random(20, 30);
+
+  DebugMsg('Init -> Setting mouse properties');
+  Mouse.CanIdle := False;
+  Mouse.MissChance := 0;
+  Mouse.Distribution := MOUSE_DISTRIBUTION_GAUSS;
+
+  DebugMsg('Init -> Setting up Map and RSW regions');
+  Map.SetupChunks([Rimmington_Chunk]);
+  RSW.SetupRegions([RSRegions.RIMMINGTON]);
+  Objects.Setup(Map.Objects, @Map.Walker);
+  NPCs.Setup(Map.NPCS, @Map.Walker);
+
+  DebugMsg('Init -> Setting up AdvertBoard finder');
+  AdvertBoard := Objects.Get(29091);
+  AdvertBoard.Finder.ColorClusters +=  [CTS2(10784355, 22, 0.06, 0.50), CTS2(9409945, 10, 0.19, 0.26), 4];
+  AdvertBoard.Finder.ColorClusters +=  [CTS2(10784355, 22, 0.06, 0.50), CTS2(7374483, 7, 0.10, 0.51), 4];
+  AdvertBoard.Finder.Grow := 3;
+  AdvertBoard.Finder.Erode := 2;
+  AdvertBoard.Filter := [True, False, True, True];
+
+  DebugMsg('Init -> Setting up Phials finder');
+  Phials.Setup(4, 6, [[7192, 3598], [7192, 3602], [7192, 3606],
+                      [7188, 3598], [7188, 3602], [7188, 3606],
+                      [7184, 3598], [7184, 3602], [7184, 3606]]);
+  Phials.SetupUpText(['Phials']);
+  Phials.Finder.ColorClusters += [CTS2(6184805, 11, 0.23, 0.08), CTS2(2039588, 2, 0.01, 1.32), 4];
+  Phials.Finder.ColorClusters += [CTS2(8299210, 7, 0.04, 1.55), CTS2(2039588, 2, 0.01, 1.32), 4];
+  Phials.Finder.ClusterDistance := 7;
+  Phials.Finder.Grow := 7;
+  Phials.Finder.Erode := 2;
+  Phials.Filter.MinimapDot := False;
+
+  DebugMsg('Init -> Setting up GildedAltar finder');
+  GildedAltar.Finder.ColorClusters := [[AltarTop, AltarGold, 10],[AltarBook, AltarGold, 10],
+                                       [AltarFront, AltarBase, 10],[AltarBones, AltarTop, 10],
+                                       [AltarEffect, AltarTop, 10]];
+  GildedAltar.Finder.ClusterDistance := 4;
+  GildedAltar.Finder.Grow := 3;
+  GildedAltar.Finder.Erode := 1;
+  GildedAltar.Filter := [False, False, True, False];
+
+  DebugMsg('Init -> Setting up OrnatePool finder');
+  OrnatePool.Finder.ColorClusters += [CTS2(7432319, 4, 0.21, 0.21), CTS2(5655401, 5, 0.18, 0.25), 3];
+  OrnatePool.Finder.ColorClusters += [CTS2(5655401, 5, 0.18, 0.25), CTS2(1621738, 22, 0.03, 0.62), 5];
+  OrnatePool.Finder.ClusterDistance := 2;
+  OrnatePool.Finder.Erode := 2;
+  OrnatePool.Finder.Grow := 4;
+
+  if Self.BoneType = '(Auto)' then
+  begin
+    DebugMsg('Init -> BoneType is (Auto), detecting bones in inventory');
+    Inventory.Open;
+    for i := 1 to High(ALLBONES) do
+    begin
+      if Inventory.FindItem('noted ' + ALLBONES[i] + ' bones', Self.NotedBonesSlot) then
+      begin
+        DebugMsg('Init -> Found ' + ALLBONES[i] + ' bones, checking uptext');
+        Inventory.MouseSlot(Self.NotedBonesSlot);
+        Wait(1000, 1300);
+
+        case True of
+          Mainscreen.IsUpText(['Super', 'perio', 'Superior dragon'])      : Self.BoneType := 'Superior dragon';
+          Mainscreen.IsUpText(['Lava ', 'ava d', 'Lava dragon'])          : Self.BoneType := 'Lava dragon';
+          Mainscreen.IsUpText(['Frost', 'ost d'])                         : Self.BoneType := 'Frost dragon';
+          Mainscreen.IsUpText(['Drago', 'ragon', 'Dragon'])               : Self.BoneType := 'Dragon';
+          Mainscreen.IsUpText(['Wyrml', 'mling', 'Wyrmling'])             : Self.BoneType := 'Wyrmling';
+          Mainscreen.IsUpText(['Stry', 'ykew'])                           : Self.BoneType := 'Strykewyrm';
+          Mainscreen.IsUpText(['Wyrm', 'yrm', 'Wyrm'])                    : Self.BoneType := 'Wyrm';
+          Mainscreen.IsUpText(['Babyd', 'ydrag', 'Babydragon'])           : Self.BoneType := 'Babydragon';
+          Mainscreen.IsUpText(['Monke', 'onkey', 'Monkey'])               : Self.BoneType := 'Monkey';
+          Mainscreen.IsUpText(['at', 'Bat'])                              : Self.BoneType := 'Bat';
+          Mainscreen.IsUpText(['Bi', 'Big'])                              : Self.BoneType := 'Big';
+          Mainscreen.IsUpText(['Jogr', 'ogre', 'Jogre'])                  : Self.BoneType := 'Jogre';
+          Mainscreen.IsUpText(['Shaik', 'ikaha', 'Shaikahan'])            : Self.BoneType := 'Shaikahan';
+          Mainscreen.IsUpText(['Wol', 'Wolf'])                            : Self.BoneType := 'Wolf';
+          Mainscreen.IsUpText(['Burnt', 'urnt', 'Burnt'])                 : Self.BoneType := 'Burnt';
+          Mainscreen.IsUpText(['Zogr', 'ogre', 'Zogre'])                  : Self.BoneType := 'Zogre';
+          Mainscreen.IsUpText(['Wyver', 'yvern', 'Wyvern'])               : Self.BoneType := 'Wyvern';
+          Mainscreen.IsUpText(['Drake', 'rake', 'Drake'])                 : Self.BoneType := 'Drake';
+          Mainscreen.IsUpText(['Fayrg', 'ayrg', 'Fayrg'])                 : Self.BoneType := 'Fayrg';
+          Mainscreen.IsUpText(['Raurg', 'aurg', 'Raurg'])                 : Self.BoneType := 'Raurg';
+          Mainscreen.IsUpText(['Hydra', 'ydra', 'Hydra'])                 : Self.BoneType := 'Hydra';
+          Mainscreen.IsUpText(['Dagan', 'anoth', 'Dagannoth'])            : Self.BoneType := 'Dagannoth';
+          Mainscreen.IsUpText(['Ourg', 'urg', 'Ourg'])                    : Self.BoneType := 'Ourg';
+        else
+          Self.BoneType := ALLBONES[i];
+        end;
+
+        DebugMsg('Init -> BoneType identified as: ' + Self.BoneType);
+        Break;
+      end;
+    end;
+  end;
+
+  DebugMsg('Init -> Reading start XP and setting up antiban');
+  Self.StartXP := XPBar.Read();
+  Self.SetupAntiban();
+  Self.TrueRunTime.Start();
+
+  CurrentBone := 'noted ' + Self.GetBone;
+
+  DebugMsg('Init -> Locating Coins and Noted Bones');
+  Inventory.FindItem('Coins', Self.CoinSlot);
+  DebugMsg('Init -> Coins are in currently in slot: ' + ToStr(Self.CoinSlot));
+  Inventory.FindItem(CurrentBone, Self.NotedBonesSlot);
+  DebugMsg('Init -> Noted bones are in currently in slot: ' + ToStr(Self.NotedBonesSlot));
+
+  if Self.CoinSlot <> 0 then
+  begin
+    DebugMsg('Init -> Coins not in slot 0. Dragging Coins to slot 0');
+    Inventory.Drag(Self.CoinSlot, 0);
+  end;
+  if Self.notedBoneSlot <> 1 then
+  begin
+    DebugMsg('Init -> Noted bones not in slot 1. Dragging Noted Bones to slot 1');
+    Inventory.Drag(Self.NotedBonesSlot, 1);
+  end;
+
+  Inventory.FindItem('Coins', Self.CoinSlot);
+  Inventory.FindItem(CurrentBone, Self.NotedBonesSlot);
+
+  if Self.TurnOffChat then
+  begin
+    DebugMsg('Init -> Disabling Public Chat');
+    if not ChangeButtonState(EChatButton.PUBLIC_CHAT, EChatButtonState.DISABLED) then
+      TerminateScript('Couldn''t disable public chat');
+    Wait(150, 300);
+  end;
+
+  if GameInterface.IsOpen(EInterfaceType.CLASSIC) then
+  begin
+    DebugMsg('Init -> Closing open interface');
+    Keyboard.PressKey(VK_ESCAPE);
+    Wait(150, 300);
+  end;
+
+  BONE_XP := [0, 15, 15, 16, 17, 50, 50, 70, 75, 85, 100, 170, 200,
+              245, 245, 270, 290, 290, 330, 345, 380, 430, 480, 520];
+
+  DebugMsg('Init -> Running GetPool');
+  Self.GetPool();
+
+  Self.StartingBones := Inventory.CountItemStack(CurrentBone);
+  DebugMsg('Init -> Starting bone count recorded: ' + IntToStr(Self.StartingBones));
+
+  Wait(Random(600,1250));
+
+  DebugMsg('Init -> Initialization complete, setting termination callback');
+  AddOnTerminate(@EndScript);
+end;
+
+procedure TScript.CheckInventory();
+begin
+  DebugMsg('CheckInventory -> Checking coin stack');
+  if (Inventory.CountItemStack('Coins') < 130) or (not Inventory.ContainsItem('Coins')) then
+  begin
+    DebugMsg('CheckInventory -> Insufficient coins found');
+    TerminateScript('Not enough coins to continue!');
+  end;
+  DebugMsg('CheckInventory -> Coin check passed');
+end;
+
+function TScript.BoneTypeToIndex(boneName: string): Int32;
+var
+  i: Integer;
+begin
+  DebugMsg('BoneTypeToIndex -> Searching for index of bone: ' + boneName);
+  for i := 0 to High(ALLBONES) do
+  begin
+    if ALLBONES[i] = boneName then
+    begin
+      DebugMsg('BoneTypeToIndex -> Found ' + boneName + ' at index ' + IntToStr(i));
+      Exit(i);
+    end;
+  end;
+  DebugMsg('BoneTypeToIndex -> Bone type ' + boneName + ' not found in ALLBONES');
+  Result := -1;
+end;
+
+procedure TScript.RecoverPosition();
+begin
+  DebugMsg('RecoverPosition -> Whoops. Need to recover position.');
+
+  DebugMsg('RecoverPosition -> Adjusting compass for orientation');
+  EnsureCompass(270, 250, 290);
+
+  while not Map.Position.InBox(WalkBackBox) do
+  begin
+    DebugMsg('RecoverPosition -> Current position is outside WalkBackBox; executing WebWalk');
+    Map.Walker.WebWalk([7712,37554]);
+
+    while Minimap.IsPlayerMoving do
+    begin
+      DebugMsg('RecoverPosition -> Waiting for player to stop moving...');
+      WaitEx(125, 20);
+    end;
+
+    DebugMsg('RecoverPosition -> Movement paused; checking if reached WalkBackBox');
+  end;
+
+  DebugMsg('RecoverPosition -> Position recovered successfully');
+end;
+
+function TScript.GetState(): EState;
+var
+  chatTitle: String;
+  atpa: T2DPointArray;
+  newlyEligiblePohs: TStringArray;
+  hasNotedBones: Boolean;
+begin
+  GameClient.Image.Clear;
+  Map.Position;
+
+  if (GetSystemTime() - Self.LastReportTime >= 60000) then
+  begin
+    DebugMsg('GetState -> Reporting stats and resetting timer');
+    Self.Report();
+    Self.LastReportTime := GetSystemTime();
+  end;
+
+  DebugMsg('GetState -> Checking inventory');
+  Self.CheckInventory();
+
+  DebugMsg('GetState -> Checking XP gains');
+  XPBar.EarnedXP();
+
+  DebugMsg('GetState -> Submitting stats...');
+  Self.SubmitMyStats();
+
+  if ((SRL.CountColor(CTS0(128, 0), Chat.Bounds) > 0))  and not Chat.GetOptions()[0].Text.Contains('Go to') then
+  begin
+    DebugMsg('GetState -> HANDLE_PHIALS_CHAT');
+    Exit(EState.HANDLE_PHIALS_CHAT);
+  end;
+
+  if not LowMinimapSimilarity then
+  begin
+    DebugMsg('GetState -> In Rimmington (High similarity)');
+    Self.InBadPoh := False;
+    Self.UsingAltar := False;
+
+    if not LowMinimapSimilarity and not Map.Position().InBox(RecoverBox) then
+    begin
+      DebugMsg('GetState -> Out of RecoverBox, calling RecoverPosition');
+      RecoverPosition;
+    end;
+
+    hasNotedBones := Inventory.ContainsItem(CurrentBone) or Inventory.IsSlotSelected(Self.NotedBonesSlot);
+
+    if Inventory.IsFull() or ((not hasNotedBones) and Inventory.ContainsItem(Self.GetBone)) then
+    begin
+      DebugMsg('GetState -> Inventory full or carrying unnoted bones; attempting to enter house');
+      EnsureCompass(270, 250, 290);
+      newlyEligiblePohs := Self.BadPohs.DeleteOld(1 * 180 * 1000, True);
+
+      if (Length(newlyEligiblePohs) > 0) and (Length(Self.PohName) > 0) and
+          (not Self.POHPlayer.Contains(Self.PohName)) and
+          newlyEligiblePohs.ContainsAny(Self.POHPlayer) then
+      begin
+        DebugMsg('GetState -> Previous host now eligible, clearing current PohName');
+        Self.PohName := '';
+      end;
+
+      if Length(Self.PohName) > 0 then
+      begin
+        DebugMsg('GetState -> ENTER_HOUSE');
+        Exit(EState.ENTER_HOUSE);
+      end;
+
+      if GameInterface.IsOpen(EInterfaceType.CLASSIC) then
+      begin
+        DebugMsg('GetState -> ENTER_HOUSE_FROM_AD');
+        Exit(EState.ENTER_HOUSE_FROM_AD);
+      end;
+
+      if not AdvertBoard.IsVisible() then
+      begin
+        DebugMsg('GetState -> Random rotate because we can''t see the little blue house.');
+        Antiban.RandomRotate();
+      end;
+
+      DebugMsg('GetState -> OPEN_HOUSE_ADS');
+      Exit(EState.OPEN_HOUSE_ADS);
+    end;
+
+    if hasNotedBones then
+    begin
+      DebugMsg('GetState -> Found noted bones in inventory');
+      if not Phials.Find(atpa) then
+      begin
+        DebugMsg('GetState -> FIND_PHIALS');
+        Exit(EState.FIND_PHIALS);
+      end;
+
+      if not Inventory.IsSlotSelected(Self.NotedBonesSlot) then
+      begin
+        DebugMsg('GetState -> SELECT_NOTED_BONES');
+        Exit(EState.SELECT_NOTED_BONES);
+      end;
+
+      DebugMsg('GetState -> USE_NOTED_BONES_ON_PHIALS');
+      Exit(EState.USE_NOTED_BONES_ON_PHIALS);
+    end;
+
+    begin
+      DebugMsg('GetState -> Critical failure: No bones found or selection logic failed');
+      TerminateScript('Failed to determine next state. Out of bones or selection error.');
+    end;
+  end;
+
+  if Self.InBadPoh then
+  begin
+    DebugMsg('GetState -> LEAVE_HOUSE');
+    Exit(EState.LEAVE_HOUSE);
+  end;
+
+  if not Self.InBadPoh and not Inventory.HasSpace(26) and (PercentRed > 2) then
+  begin
+    DebugMsg('GetState -> Valid house and carrying bones; preparing altar usage');
+    EnsureZoom(50, 45, 55);
+    EnsureCompass(305, 295, 315);
+
+    while Self.UsingAltar and (Self.ScriptSpeed = 'Chill') and not Inventory.HasSpace(26) do
+    begin
+      DebugMsg('GetState -> Waiting in Chill mode while using altar');
+      Wait(1200);
+    end;
+
+    if Self.UsingAltar and ((Self.ScriptSpeed = 'Normal') or (Self.ScriptSpeed = 'Turbo')) and not Inventory.HasSpace(26) then
+    begin
+      DebugMsg('GetState -> OFFER_BONES');
+      Exit(EState.OFFER_BONES);
+    end;
+
+    DebugMsg('GetState -> USE_BONES_ON_ALTAR');
+    Exit(EState.USE_BONES_ON_ALTAR);
+  end;
+
+  DebugMsg('GetState -> Checking run energy');
+  Minimap.GetRunEnergy();
+  if Self.GetPool and not Self.InBadPoh and (Inventory.CountItem(Self.GetBone) < 1)
+      and (CurrentRunEnergy < MinRunEnergy) and not ClickedPool then
+  begin
+    Self.UsingAltar := False;
+    DebugMsg('GetState -> USE_POOL');
+    Exit(EState.USE_POOL);
+  end;
+
+  DebugMsg('GetState -> Default: Leaving house and resetting altar state');
+  Self.UsingAltar := False;
+  EnsureZoom(15, 10, 20);
+  DebugMsg('GetState -> LEAVE_HOUSE');
+  Exit(EState.LEAVE_HOUSE);
+end;
+
+procedure TScript.Run();
+var
+  cycleAttempts: Integer;
+  lastState: EState;
+  success: Boolean;
+begin
+  repeat
+    DebugATPA := [];
+    Self.State := Self.GetState();
+    success := False;
+
+    case Self.State of
+      EState.FIND_PHIALS:               success := Self.FindPhials();
+      EState.SELECT_NOTED_BONES:        success := Self.SelectNotedBones();
+      EState.USE_NOTED_BONES_ON_PHIALS: success := Self.UseNotedBonesOnPhials();
+      EState.HANDLE_PHIALS_CHAT:        success := Self.HandlePhialsChat();
+      EState.OPEN_HOUSE_ADS:            success := Self.OpenHouseAds();
+      EState.ENTER_HOUSE_FROM_AD:       success := Self.EnterHouseFromAd();
+      EState.ENTER_HOUSE:               success := Self.EnterHouse();
+      EState.USE_BONES_ON_ALTAR:        success := Self.UseBonesOnAltar();
+      EState.OFFER_BONES:               success := Self.OfferBones();
+      EState.USE_POOL:                  success := Self.UseOrnatePool();
+      EState.LEAVE_HOUSE:               success := Self.LeaveHouse();
+    end;
+
+    if Self.GetDebugMode then
+      GameClient.Image.Clear();
+
+    if not success then
+    begin
+      Inc(cycleAttempts);
+      Inc(Self.Attempts);
+
+      if cycleAttempts >= 25 then
+      begin
+        begin
+          TerminateScript('Failed to advance state after 25 attempts: ' + ToStr(Self.State));
+        end;
+      end;
+
+      if Self.Attempts >= 25 then
+      begin
+        if Self.State in [EState.OFFER_BONES, EState.USE_BONES_ON_ALTAR] then
+        begin
+          lastState := Self.State;
+          Self.Attempts := 0;
+          Self.State := EState.LEAVE_HOUSE;
+          success := Self.LeaveHouse();
+          if not success then
+          begin
+            TerminateScript('Failed to leave house after failing state: ' + ToStr(lastState));
+          end;
+        end
+        else
+        begin
+          TerminateScript('Failed to advance state: ' + ToStr(Self.State));
+        end;
+      end;
+    end
+    else
+    begin
+      Self.Attempts := 0;
+      if Self.State = EState.LEAVE_HOUSE then
+        cycleAttempts := 0;
+    end;
+
+    if Self.State in [EState.FIND_PHIALS, EState.SELECT_NOTED_BONES, EState.HANDLE_PHIALS_CHAT, EState.ENTER_HOUSE, EState.LEAVE_HOUSE] then
+    begin
+      if Antiban.DoAntiban() and not GameClient.IsLoggedIn() then
+        Self.LoginPlayer();
+    end;
+
+  until (GetTimeRunning() > Self.ShutdownTime);
+end;
+
+procedure GUI.OpenExample(sender: TObject);
+begin
+  Sender;
+  OpenWebPage('https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/ProblemSSExample.png?raw=true')
+end;
+
+procedure GUI.ExitScript(sender: TObject);
+begin
+  TForm(TButton(Sender).GetParent()).Close;
+  TerminateScript('Thank you for trying to fix these problems before running the script!');
+end;
+
+procedure GUI.CloseForm(sender: TObject);
+begin
+  TForm(TButton(Sender).GetParent()).Close;
+end;
+
+procedure GUI.CheckProblems;
+var
+  warningForm: TForm;
+  detProbMsg: TLabel;
+  waspLauncherMsg, fixedModeMsg, notSubbedMsg, warningMsg: TMemo;
+  nextTop: Integer;
+  showWasp, showFixed, showSub: Boolean;
+  continueButton, exitButton: TButton;
+begin
+  with warningForm do
+  begin
+    Init(nil);
+    SetCaption('!!! WARNING !!!');
+    SetBounds(0,0,TControl.AdjustToDPI(600),TControl.AdjustToDPI(500));
+    SetPosition(poScreenCenter);
+    GetFont.SetStyle([fsBold]);
+  end;
+
+  with detProbMsg do
+  begin
+    Init(warningForm);
+    SetParent(warningForm);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(0));
+    GetFont().SetSize(18);
+    SetCaption('Detected problem(s):');
+  end;
+
+  // Keeps track of TMemo positions to dynamically move up TMemos
+  nextTop := detProbMsg.GetTop + detProbMsg.GetHeight + TControl.AdjustToDPI(25);
+
+  if (ScriptFile.after("\waspscripts.com\") <> 'gilded-altar-offerer-by-baconadors.simba')or DEBUGMODE then
+  begin
+    showWasp  := True;
+    with waspLauncherMsg do
+    begin
+      Init(warningForm);
+      SetParent(warningForm);
+      SetBounds(TControl.AdjustToDPI(5), nextTop, warningForm.GetWidth - TControl.AdjustToDPI(10), TControl.AdjustToDPI(75));
+      GetFont().SetSize(13);
+      SetCaption('You are likely not running this script via Wasp Launcher. ' +
+                 'Wasp Launcher is the only supported way to run and keep libraries/' +
+                 'scripts up-to-date. Please use Wasp Launcher when possible.');
+      SetReadOnly(True);
+      nextTop := nextTop + waspLauncherMsg.GetHeight + TControl.AdjustToDPI(10);
+    end;
+  end;
+
+  if (GameClient.Mode <> EClientMode.FIXED) or DEBUGMODE then
+  begin
+    showFixed := True;
+    with fixedModeMsg do
+    begin
+      Init(warningForm);
+      SetParent(warningForm);
+      SetBounds(TControl.AdjustToDPI(5), nextTop, warningForm.GetWidth - TControl.AdjustToDPI(10), TControl.AdjustToDPI(53));
+      GetFont().SetSize(13);
+      SetCaption('You are not using the FIXED CLASSIC screen mode. FIXED CLASSIC ' +
+                 'mode is the only supported mode for this script.');
+      SetReadOnly(True);
+      nextTop := nextTop + fixedModeMsg.GetHeight + TControl.AdjustToDPI(10);
+    end;
+  end;
+
+  if not WaspClient.HasAccess({$MACRO SCRIPT_ID}, {$MACRO SCRIPT_REVISION}) or DEBUGMODE then
+  begin
+    showSub   := True;
+    with notSubbedMsg do
+    begin
+      Init(warningForm);
+      SetParent(warningForm);
+      SetBounds(TControl.AdjustToDPI(5), nextTop, warningForm.GetWidth - TControl.AdjustToDPI(10), TControl.AdjustToDPI(100));
+      GetFont().SetSize(13);
+      SetCaption('Your subscription to this script could not be verified. ' +
+                 'This may be because your subscription has run out or the ' +
+                 'script may not have been downloaded & opened via Wasp Launcher. ' +
+                 'Please consider subscribing to support your script author.');
+      SetReadOnly(True);
+      nextTop := nextTop + notSubbedMsg.GetHeight + TControl.AdjustToDPI(10);
+    end;
+  end;
+
+  warnImg.init();
+  warnImg.LoadFromFile('Resources\Warning_Triangle_140.png');
+  with warnTriangle140 do
+  begin
+    Init(warningForm);
+    SetParent(warningForm);
+    SetName('warn_Triangle_150');
+    SetBounds(TControl.AdjustToDPI(5), TControl.AdjustToDPI(300), TControl.AdjustToDPI(150), TControl.AdjustToDPI(132));
+    SetPicture(warnImg);
+    SetVisible(True);
+    BringToFront;
+  end;
+
+  with warningMsg do
+  begin
+    Init(warningForm);
+    SetParent(warningForm);
+    SetBounds(warnTriangle140.GetLeft + warnTriangle140.GetWidth + TControl.AdjustToDPI(10), warnTriangle140.GetTop,
+              warningForm.GetWidth - warnTriangle140.GetWidth - warnTriangle140.GetLeft - TControl.AdjustToDPI(15), TControl.AdjustToDPI(123));
+    GetFont().SetSize(13);
+    SetCaption('By continuing with this script, you acknowledge that these ' +
+               'problems may cause instability or other issues. ' +
+               'When asking for help, post a screenshot with Simba & RuneLite FULLY visible. ' + LineEnding +
+               '      Click this text box for an example screenshot.');
+    setOnClick(@OpenExample);
+  end;
+
+  with continueButton do
+  begin
+    Init(warningForm);
+    SetParent(warningForm);
+    SetBounds(TControl.AdjustToDPI(5),(warnTriangle140.getTop + warnTriangle140.getHeight),
+              TControl.AdjustToDPI(294), TControl.AdjustToDPI(62));
+    GetFont.SetSize(18);
+    SetCaption('CONTINUE');
+    setOnClick(@CloseForm);
+  end;
+
+  with exitButton do
+  begin
+    Init(warningForm);
+    SetParent(warningForm);
+    SetBounds(continueButton.GetRight + TControl.AdjustToDPI(3),(warnTriangle140.getTop + warnTriangle140.getHeight),
+              continueButton.getWidth, TControl.AdjustToDPI(62));
+    GetFont.SetSize(18);
+    SetCaption('STOP SCRIPT');
+    setOnClick(@ExitScript);
+  end;
+
+  if showWasp or showFixed or showSub or DEBUGMODE then
+    warningForm.ShowModal;
+
+end;
+
+procedure GUI.OnlyNumbers(sender: TObject; var Key: Char);
+begin
+  // Allow control keys like backspace (#8), and only digits 0–9
+  if not (Key in ['0'..'9', ':', #8]) then
+    Key := #0; // Block the key
+end;
+
+procedure GUI.UpdateBackgrounds(sender: TObject);
+var
+  tabName: String;
+begin
+  tabName := Self.PageControl.GetActivePage.GetName;
+
+  if tabName = 'Settings_Tab' then
+  begin
+    Self.BGImgSettings.SetVisible(True);
+    Self.BGImgAccounts.SetVisible(False);
+  end
+  else
+  begin
+    Self.BGImgSettings.SetVisible(False);
+    Self.BGImgAccounts.SetVisible(True);
+  end;
+end;
+
+procedure GUI.StartScript(sender: TObject); override;
+var
+  S: TGameObject;
+  MaxRun: Int32;
+  e_Run,e_BA,e_BF,e_SA,e_SF: TEdit;
+  cb_Breaks,cb_Sleeps, cb_Burners,
+  cb_Chat, cb_Pool, cb_Debug: TCheckBox;
+  cb_Bone,cb_Speed: TComboBox;
+  memo_POHPlayer, memo_Blacklist: TMemo;
+begin
+  inherited;
+
+{ Time settings }
+  e_Run                   := Self.Form.GetChild('box_run_edit');
+  MaxRun                  := StrToInt(e_Run.getText);
+  Bot.ShutdownTime    := (MaxRun * 60000) + Random(- (MaxRun * 6000), (MaxRun * 6000));
+  Self.Config.Put('maxrun', e_Run.getText);
+
+  cb_Breaks               := Self.Form.GetChild('cb_breaks_checkbox');
+  Bot.TakeBreaks      := cb_Breaks.IsChecked;
+  if Bot.TakeBreaks then
+  begin
+    e_BA                  := Self.Form.GetChild('box_ba_edit');
+    e_BF                  := Self.Form.GetChild('box_bf_edit');
+    Antiban.AddBreak(ONE_MINUTE*StrToInt(e_BA.getText),ONE_MINUTE*StrToInt(e_BF.getText), 0.15, 1.0);
+    Self.Config.Put('cbbreaks', cb_Breaks.IsChecked);
+    Self.Config.Put('breakafter', e_BA.getText);
+    Self.Config.Put('breakfor', e_BF.getText);
+  end;
+
+  cb_Sleeps               := Self.Form.GetChild('cb_sleeps_checkbox');
+  Bot.TakeSleeps      := cb_Sleeps.IsChecked;
+  if Bot.TakeSleeps then
+  begin
+    e_SA                  := Self.Form.GetChild('box_sa_edit');
+    e_SF                  := Self.Form.GetChild('box_sf_edit');
+    Antiban.AddSleep(e_SA.getText, StrToInt(e_SF.getText) * ONE_HOUR, 0.1, 1.0);
+    Self.Config.Put('cbsleeps', cb_Sleeps.IsChecked);
+    Self.Config.Put('sleepat', e_SA.getText);
+    Self.Config.Put('sleepfor', e_SF.getText);
+  end;
+
+{ Script settings }
+  cb_Bone                  := Self.Form.GetChild('lcb_bone_combobox');
+  cb_Speed                 := Self.Form.GetChild('lcb_speed_combobox');
+  memo_POHPlayer           := Self.Form.GetChild('box_player_memo');
+  memo_Blacklist           := Self.Form.GetChild('box_blacklist_memo');
+  cb_Burners               := Self.Form.GetChild('cb_burners_checkbox');
+  cb_Chat                  := Self.Form.GetChild('cb_chat_checkbox');
+  cb_Pool                  := Self.Form.GetChild('cb_pool_checkbox');
+  cb_Debug                 := Self.Form.GetChild('cb_debug_checkbox');
+
+{ MISC settings }
+  Bot.BoneType        := cb_Bone.getText;
+  Bot.ScriptSpeed     := cb_Speed.getText;
+  Bot.POHPlayer       := memo_POHPlayer.GetStringArray;
+  Bot.POHBlacklist    := memo_Blacklist.GetStringArray;
+  Bot.debugDrawing    := cb_Debug.IsChecked;
+  Bot.UseLitBurners   := cb_Burners.IsChecked;
+  Bot.TurnOffChat     := cb_Chat.IsChecked;
+  Bot.UsePOHPool      := cb_Pool.IsChecked;
+
+  Self.Config.Put('lcbBone', cb_Bone.getItemIndex);
+  Self.Config.Put('lcbSpeed', cb_Speed.getItemIndex);
+  Self.Config.Put('memoPOHPlayer', memo_POHPlayer.getText);
+  Self.Config.Put('memoBlacklist', memo_Blacklist.getText);
+  Self.Config.Put('cbBurners', cb_Burners.IsChecked);
+  Self.Config.Put('cbChat', cb_Chat.IsChecked);
+  Self.Config.Put('cbPool', cb_Pool.IsChecked);
+  Self.Config.Put('cbDebug', cb_Debug.IsChecked);
+
+  Self.Form.Close();
+  DebugMsg('Starting script');
+
+end;
+
+function GUI.CreateSettingsTab(): TTabSheet;
+var
+  lb_Time,lb_Script,lb_Misc: TLabel;
+  cb_Breaks,cb_Sleeps,cb_Burners,cb_Chat,
+  cb_Pool,cb_Debug: TLabeledCheckBox;
+  box_Run,box_BA,box_BF,
+  box_SA,box_SF : TLabeledEdit;
+  lcb_Bone,lcb_Speed: TLabeledComboBox;
+  box_Player, box_Blacklist: TLabeledMemo;
+  tp_Video    : TPanel;
+
+begin
+  Result.Init(nil);
+  Result.SetCaption('Script Settings');
+  Result.SetName('Settings_Tab');
+
+  ImgSettings.init();
+  ImgSettings.LoadFromFile('Resources\GildedAltarGUI_Settings_' + VERSION + '.png');
+  with BGImgSettings do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(ImgSettings);
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetVisible(True);
+  end;
+
+  Result.setOnShow(@UpdateBackgrounds);
+  Result.setOnHide(@UpdateBackgrounds);
+
+{ Setup time settings }
+  with lb_Time do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(10));
+    GetFont().SetSize(15);
+    SetCaption('Time settings');
+    GetFont.SetStyle([fsBold]);
+  end;
+
+  with box_Run do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(5));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('box_Run');
+    SetCaption('Max Run Time - X Minutes');
+    SetToolTip('Time in minutes');
+    Edit.SetOnKeyPress(@OnlyNumbers);
+    if Self.Config.Has('maxrun') then
+      SetText(Self.Config.GetString('maxrun'))
+    else
+      SetText(ToStr(RandomRange(300,500)));
+  end;
+
+  with cb_Breaks do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(100));
+    SetName('cb_breaks');
+    SetCaption('Take breaks');
+    if Self.Config.Has('cbbreaks') then
+      SetChecked(Self.Config.GetBoolean('cbbreaks'))
+    else
+      SetChecked(True);
+  end;
+
+  with box_BA do
+  begin
+    Create(Result);
+    SetLeft(box_Run.GetLeft);
+    SetTop(TControl.AdjustToDPI(120));
+    SetName('box_ba');
+    SetCaption('Break after X Minutes');
+    SetToolTip('Time in minutes');
+    Edit.SetOnKeyPress(@OnlyNumbers);
+    if Self.Config.Has('breakafter') then
+      SetText(Self.Config.GetString('breakafter'))
+    else
+      SetText(ToStr(RandomRange(50,75)));
+  end;
+
+  with box_BF do
+  begin
+    Create(Result);
+    SetLeft(box_Run.GetLeft);
+    SetTop(TControl.AdjustToDPI(165));
+    SetName('box_bf');
+    SetCaption('Break for X Minutes');
+    SetToolTip('Time in minutes');
+    Edit.SetOnKeyPress(@OnlyNumbers);
+    if Self.Config.Has('breakfor') then
+      SetText(Self.Config.GetString('breakfor'))
+    else
+      SetText(ToStr(RandomRange(7,15)));
+  end;
+
+  with cb_Sleeps do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(25));
+    SetTop(TControl.AdjustToDPI(215));
+    SetName('cb_sleeps');
+    SetCaption('Take sleeps');
+    SetFontColor($00FFFF);
+    if Self.Config.Has('cbsleeps') then
+      SetChecked(Self.Config.GetBoolean('cbsleeps'))
+    else
+      SetChecked(True);
+  end;
+
+  with box_SA do
+  begin
+    Create(Result);
+    SetLeft(box_Run.GetLeft);
+    SetTop(TControl.AdjustToDPI(235));
+    SetName('box_sa');
+    SetCaption('Sleep at Time (24Hr format)');
+    SetToolTip('Time in 24Hr format');
+    if Self.Config.Has('sleepat') then
+      SetText(Self.Config.GetString('sleepat'))
+    else
+      SetText(ToStr(RandomRange(20,22))+':' + ToStr(RandomRange(0,59))+':00');
+  end;
+
+  with box_SF do
+  begin
+    Create(Result);
+    SetLeft(box_Run.GetLeft);
+    SetTop(TControl.AdjustToDPI(280));
+    SetName('box_sf');
+    SetCaption('Sleep for X Hours');
+    SetToolTip('Time in hours');
+    Edit.SetOnKeyPress(@OnlyNumbers);
+    if Self.Config.Has('sleepfor') then
+      SetText(Self.Config.GetString('sleepfor'))
+    else
+      SetText(ToStr(RandomRange(6,9)));
+  end;
+
+{ Setup offering settings }
+  with lb_Script do
+  begin
+    Create(Result);
+    SetLeft(TControl.AdjustToDPI(300));
+    SetTop(TControl.AdjustToDPI(10));
+    GetFont().SetSize(15);
+    SetCaption('Offering settings');
+    GetFont.SetStyle([fsBold]);
+  end;
+
+  with lcb_Bone do
+  begin
+    Create(Result);
+    SetLeft(box_Run.GetRight + TControl.AdjustToDPI(120));
+    SetTop(TControl.AdjustToDPI(45));
+    SetName('lcb_bone');
+    SetCaption('Bone type');
+    AddItemArray(ALLBONES);
+    if Self.Config.Has('lcbbone') then
+      SetItemIndex(Self.Config.GetInt('lcbbone'))
+    else
+      SetItemIndex(0);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with lcb_Speed do
+  begin
+    Create(Result);
+    SetLeft(lcb_Bone.GetLeft);
+    SetTop(TControl.AdjustToDPI(90));
+    SetName('lcb_speed');
+    SetCaption('Script Speed');
+    SetToolTip('Normal = Using bones on Altar - Turbo = REALLY FAST Mouse - Chill = Auto offer (afk offering)');
+    AddItemArray(['Normal','Turbo','Chill']);
+    if Self.Config.Has('lcbspeed') then
+      SetItemIndex(Self.Config.GetInt('lcbspeed'))
+    else
+      SetItemIndex(0);
+    ComboBox.SetFontColor(0);
+  end;
+
+  with box_Player do
+  begin
+    Create(Result);
+    SetLeft(lcb_Bone.GetLeft);
+    SetTop(lcb_Speed.GetBottom + TControl.AdjustToDPI(0));
+    SetName('box_player');
+    SetCaption('Preferred POH Player Names' + LineEnding + '(separated by commas):');
+    SetToolTip('Exact names of preferred POH player names');
+    if Self.Config.Has('memoPOHPlayer') then
+      SetText(Self.Config.GetString('memoPOHPlayer'))
+    else
+      SetText('');
+    SetHeight(TControl.AdjustToDPI(Round(Self.Form.getHeight/5)));
+    SetWidth(TControl.AdjustToDPI(Round(Self.Form.getHeight/2.374-10)));
+  end;
+
+  with box_Blacklist do
+  begin
+    Create(Result);
+    SetLeft(lcb_Bone.GetLeft);
+    SetTop(box_Player.GetBottom + TControl.AdjustToDPI(3));
+    SetName('box_blacklist');
+    SetCaption('Blacklisted POH Player Names' + LineEnding + '(separated by commas):');
+    SetToolTip('Exact names of blacklisted POH player names');
+    if Self.Config.Has('memoBlacklist') then
+      SetText(Self.Config.GetString('memoBlacklist'))
+    else
+      SetText('V 3,AltarEgo,Arbys Beef,xGrece');
+    SetHeight(TControl.AdjustToDPI(Round(Self.Form.getHeight/5)));
+    SetWidth(TControl.AdjustToDPI(Round(Self.Form.getHeight/2.374-10)));
+  end;
+
+  { Setup MISC settings }
+  with lb_Misc do
+  begin
+    Create(Result);
+    SetLeft(lcb_Bone.GetLeft + lcb_Bone.GetWidth + TControl.AdjustToDPI(127));
+    SetTop(lb_Time.getTop);
+    GetFont().SetSize(15);
+    SetCaption('Misc settings');
+    GetFont.SetStyle([fsBold]);
+  end;
+
+  tp_Video := Self.CreateVideoPanel(Result);
+  tp_Video.SetLeft(lcb_Bone.GetLeft + lcb_Bone.GetWidth + TControl.AdjustToDPI(95));
+  tp_Video.SetTop(TControl.AdjustToDPI(50));
+
+  with cb_Debug do
+  begin
+    Create(Result);
+    SetLeft(tp_Video.GetLeft + TControl.AdjustToDPI(10));
+    SetTop(tp_Video.GetBottom + TControl.AdjustToDPI(15));
+    SetName('cb_debug');
+    SetCaption('Enable Debug');
+    if Self.Config.Has('cbdebug') then
+      SetChecked(Self.Config.GetBoolean('cbdebug'))
+    else
+      SetChecked(False);
+  end;
+
+  with cb_Burners do
+  begin
+    Create(Result);
+    SetLeft(cb_Debug.GetLeft);
+    SetTop(cb_Debug.GetBottom + TControl.AdjustToDPI(10));
+    SetName('cb_burners');
+    SetCaption('Offer Only When Burners Lit');
+    if Self.Config.Has('cbburners') then
+      SetChecked(Self.Config.GetBoolean('cbburners'))
+    else
+      SetChecked(False);
+  end;
+
+  with cb_Chat do
+  begin
+    Create(Result);
+    SetLeft(cb_Burners.GetLeft);
+    SetTop(cb_Burners.GetBottom + TControl.AdjustToDPI(10));
+    SetName('cb_chat');
+    SetCaption('Turn off Public Chat');
+    SetTooltip('Disable if using AI Chatbot.');
+    if Self.Config.Has('cbchat') then
+      SetChecked(Self.Config.GetBoolean('cbchat'))
+    else
+      SetChecked(True);
+  end;
+
+  with cb_Pool do
+  begin
+    Create(Result);
+    SetLeft(cb_Chat.GetLeft);
+    SetTop(cb_Chat.GetBottom + TControl.AdjustToDPI(10));
+    SetName('cb_pool');
+    SetCaption('Use Pool for Run Energy');
+    if Self.Config.Has('cbpool') then
+      SetChecked(Self.Config.GetBoolean('cbpool'))
+    else
+      SetChecked(False);
+  end;
+end;
+
+procedure GUI.Setup(caption: String = 'Script Form'; size: TPoint = [750, 500]; allowResize: Boolean = False); override;
+var
+  SButton: TButton;
+begin
+  inherited;
+
+  Self.Config.Setup('gildedaltar');
+
+  ImgAccounts.init();
+  ImgAccounts.LoadFromFile('Resources\GildedAltarGUI_Accounts_' + VERSION + '.png');
+
+  with BGImgAccounts do
+  begin
+    Init(Self.PageControl);
+    SetParent(Self.PageControl);
+    SetPicture(ImgAccounts);
+    SetName('BGImgAccounts');
+    SetBounds(0,0,Self.Form.getWidth,Self.Form.getHeight);
+    SetVisible(False);
+  end;
+
+  Self.Start.setVisible(False);
+  with SButton do
+  begin
+    Create(Self.Form);
+    SetName('SButton');
+    SetBounds(Self.Form.GetRight-190, Self.Form.GetBottom-70, 180, 60);
+    GetFont.SetName('Bahnschrift');
+    GetFont.SetSize(18);
+    SetCaption('START');
+    GetFont.SetStyle([fsBold]);
+    SetOnClick(@Self.StartScript);
+  end;
+
+  Self.AddTab(CreateSettingsTab());
+  Self.CreateAccountManager();
+
+end;
+
+begin
+  GameClient.Image.Clear;
+  ClearDebug;
+
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('camera', False);
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('mouse', True);
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('chat', False);
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('gametabs', False);
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('bank', False);
+  WLSettings.GetObject('antiban').getJSONObject('tasks').Put('enabled', True);
+
+  GameClient.RemoteInput.DisableRealInput;
+
+  if not DirectoryExists(AppPath + '\Resources\') then
+    CreateDirectory(AppPath + '\Resources');
+
+  if not FileExists(AppPath + 'Resources\GildedAltarGUI_Settings_' + VERSION + '.png') then
+    DownloadToFile('https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/GildedGUI_Settings.png?raw=true', AppPath + 'Resources\GildedAltarGUI_Settings_' + VERSION + '.png');
+
+  if not FileExists(AppPath + 'Resources\GildedAltarGUI_Accounts_' + VERSION + '.png') then
+    DownloadToFile('https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/GildedGUI_Accounts.png?raw=true', AppPath + 'Resources\GildedAltarGUI_Accounts_' + VERSION + '.png');
+
+  if not FileExists(AppPath + '\Resources\Warning_Triangle_75.png') then
+    DownloadToFile('https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/Warning_Triangle_75.png?raw=true', AppPath + '\Resources\Warning_Triangle_75.png');
+
+  if not FileExists(AppPath + '\Resources\Warning_Triangle_140.png') then
+    DownloadToFile('https://github.com/Baconadors/Bacon-Tools/blob/main/ScriptImages/Warning_Triangle_140.png?raw=true', AppPath + '\Resources\Warning_Triangle_140.png');
+
+  if (ScriptFile.after("\waspscripts.com\") = 'gilded-altar-offerer-by-baconadors.simba') then
+    SettingsHandler.CheckGPUPlugin();
+
+  if (ScriptFile.after("\waspscripts.com\") = 'gilded-altar-offerer-by-baconadors.simba') then
+    Sync(@GUI.CheckProblems);
+
+  GUI.Setup('Gilded Altar Offerer', [753, 428]);
+  GUI.PageControl.SetAllChildsFontColor($00FFFF);
+  GUI.Run;
+
+  Bot.Init();
+  Bot.Run();
+end;
